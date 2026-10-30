@@ -8,7 +8,12 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  CartesianGrid
+  CartesianGrid,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell
 } from 'recharts';
 import {
   BookOpen,
@@ -22,7 +27,20 @@ import {
   Award,
   Send,
   FileDown,
-  History
+  History,
+  MessageSquare,
+  TrendingUp,
+  ChevronRight,
+  CheckCircle2,
+  XCircle,
+  FileText,
+  Zap,
+  BarChart3,
+  GraduationCap,
+  Calendar,
+  ArrowUpRight,
+  Flag,
+  RefreshCw
 } from 'lucide-react';
 import { lmsApi, extractErrorMessage } from '../services/api';
 import {
@@ -35,10 +53,62 @@ import {
   useToast
 } from '../components/ui/SharedComponents';
 
+/* ── tiny helpers ─────────────────────────────────────────── */
+function ProgressBar({ value = 0, color = 'bg-blue-500', height = 'h-2' }) {
+  const clamped = Math.min(100, Math.max(0, value));
+  return (
+    <div className={`w-full bg-slate-100 rounded-full ${height} overflow-hidden`}>
+      <div
+        className={`${color} ${height} rounded-full transition-all duration-500`}
+        style={{ width: `${clamped}%` }}
+      />
+    </div>
+  );
+}
+
+function QuickActionBtn({ to, icon: Icon, label, color }) {
+  const colorMap = {
+    blue:   'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
+    amber:  'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100',
+    emerald:'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
+    indigo: 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100',
+    rose:   'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100',
+    violet: 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100',
+  };
+  return (
+    <Link
+      to={to}
+      className={`flex flex-col items-center gap-2 p-4 rounded-xl border text-xs font-semibold transition-colors ${colorMap[color] || colorMap.blue}`}
+    >
+      <Icon className="w-5 h-5" />
+      <span className="text-center leading-tight">{label}</span>
+    </Link>
+  );
+}
+
+function SectionHeader({ title, subtitle, linkTo, linkLabel }) {
+  return (
+    <div className="flex items-start justify-between mb-3">
+      <div>
+        <h2 className="text-sm font-bold text-slate-900">{title}</h2>
+        {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
+      </div>
+      {linkTo && (
+        <Link to={linkTo} className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline shrink-0">
+          {linkLabel || 'View all'} <ArrowUpRight className="w-3 h-3" />
+        </Link>
+      )}
+    </div>
+  );
+}
+
+const PROGRESS_COLORS = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626'];
+
 export function InstructorDashboardPage() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard', 'instructor'],
-    queryFn: lmsApi.getDashboardSummary
+    queryFn: lmsApi.getDashboardSummary,
+    refetchInterval: 60_000
   });
 
   if (isLoading) return <LoadingState label="Loading instructor teaching workspace..." />;
@@ -47,123 +117,436 @@ export function InstructorDashboardPage() {
   const d = data?.data || {};
   const m = d.metrics || {};
 
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        badge="Faculty Teaching Workspace"
-        title="Instructor Dashboard & Class Analytics"
-        subtitle="Manage assigned classes, review student lab submissions, author curriculum, and monitor learning milestones."
-      />
+  const classes        = d.activeClasses || [];
+  const completionStats = d.classCompletionStats || [];
+  const pendingSubs    = d.pendingSubmissions || [];
+  const support        = d.studentsNeedingSupport || [];
+  const assessments    = d.upcomingAssessments || [];
+  const discussions    = d.recentQuestions || [];
+  const courses        = d.assignedCourses || [];
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Assigned Courses & Classes"
-          value={`${m.assignedCoursesCount ?? 0} / ${m.activeClassesCount ?? 0}`}
-          subtitle={`${m.enrolledStudentsCount ?? 0} enrolled learners`}
-          icon={BookOpen}
-          accent="blue"
-        />
-        <StatCard
-          title="Pending Submissions"
-          value={m.pendingSubmissionsCount ?? 0}
-          subtitle={`${m.pendingGradingTasksCount ?? 0} total grading tasks`}
-          icon={ClipboardCheck}
-          accent="amber"
-        />
-        <StatCard
-          title="Upcoming Assessments"
-          value={m.upcomingAssessmentsCount ?? 0}
-          subtitle={`${m.overdueActivitiesCount ?? 0} past-due activities`}
-          icon={Clock}
-          accent="indigo"
-        />
-        <StatCard
-          title="Support Indicators"
-          value={(d.studentsNeedingSupport || []).length}
-          subtitle="Learners for optional check-in"
-          icon={AlertCircle}
-          accent="rose"
-        />
+  // Flagged submissions
+  const flagged = pendingSubs.filter((s) => s.flaggedForInstructorReview);
+
+  // Progress distribution for pie
+  const progressBuckets = [
+    { name: '0–25%',  value: support.filter((s) => s.progressPercentage <= 25).length },
+    { name: '26–50%', value: support.filter((s) => s.progressPercentage > 25 && s.progressPercentage <= 50).length },
+    { name: '51–75%', value: completionStats.filter((c) => c.averageProgress > 50 && c.averageProgress <= 75).length },
+    { name: '76–100%',value: completionStats.filter((c) => c.averageProgress > 75).length },
+  ].filter((b) => b.value > 0);
+
+  return (
+    <div className="space-y-6 pb-8">
+      {/* ── Header ───────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200">
+        <div>
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-md mb-2">
+            <GraduationCap className="w-3.5 h-3.5" /> Faculty Teaching Workspace
+          </span>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Instructor Dashboard</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Overview of your classes, student progress, and pending academic tasks.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="self-start sm:self-auto flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+        >
+          <RefreshCw className="w-3.5 h-3.5" /> Refresh
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-          <h2 className="text-base font-bold text-slate-900 mb-1">Class Completion Statistics (%)</h2>
-          <p className="text-xs text-slate-500 mb-4">Average curriculum progress across assigned sections</p>
-          <div className="h-60">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={d.classCompletionStats || []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="sectionCode" tick={{ fontSize: 11 }} />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="averageProgress" fill="#2563eb" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+      {/* ── KPI Stat Cards ───────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Courses / Classes */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow transition-shadow">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Courses / Classes</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1.5">
+                {m.assignedCoursesCount ?? 0}
+                <span className="text-base font-medium text-slate-400 ml-1">/ {m.activeClassesCount ?? 0}</span>
+              </p>
+              <p className="text-xs text-slate-500 mt-1">{m.enrolledStudentsCount ?? 0} enrolled learners</p>
+            </div>
+            <div className="p-2.5 rounded-lg border bg-blue-50 text-blue-600 border-blue-100">
+              <BookOpen className="w-5 h-5" />
+            </div>
           </div>
+          <ProgressBar
+            value={m.activeClassesCount ? Math.min(100, (m.activeClassesCount / 10) * 100) : 0}
+            color="bg-blue-500"
+            height="h-1.5"
+          />
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-3">
+        {/* Pending Submissions */}
+        <div className={`bg-white rounded-xl border p-5 shadow-sm hover:shadow transition-shadow ${m.pendingSubmissionsCount > 0 ? 'border-amber-300' : 'border-slate-200'}`}>
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-bold text-slate-900">Pending Submissions & TA Flags</h2>
-              <p className="text-xs text-slate-500">Recent student work awaiting instructor evaluation</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Pending Review</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1.5">{m.pendingSubmissionsCount ?? 0}</p>
+              <p className="text-xs text-slate-500 mt-1">
+                {flagged.length > 0
+                  ? <span className="text-amber-600 font-semibold">{flagged.length} TA-flagged</span>
+                  : `${m.pendingGradingTasksCount ?? 0} total grading tasks`}
+              </p>
             </div>
-            <Link
-              to="/instructor/submissions"
-              className="text-xs font-bold text-blue-600 hover:underline"
-            >
-              Open Review Queue →
-            </Link>
+            <div className={`p-2.5 rounded-lg border ${m.pendingSubmissionsCount > 0 ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+              <ClipboardCheck className="w-5 h-5" />
+            </div>
           </div>
-          <div className="space-y-2.5 max-h-60 overflow-y-auto">
-            {(d.pendingSubmissions || []).length === 0 ? (
-              <p className="text-xs text-slate-500 py-8 text-center">No pending submissions in queue.</p>
+          <ProgressBar
+            value={m.pendingGradingTasksCount ? Math.min(100, (m.pendingSubmissionsCount / m.pendingGradingTasksCount) * 100) : 0}
+            color="bg-amber-400"
+            height="h-1.5"
+          />
+        </div>
+
+        {/* Assessments */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow transition-shadow">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Assessments</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1.5">{m.upcomingAssessmentsCount ?? 0}</p>
+              <p className="text-xs text-slate-500 mt-1">
+                {m.overdueActivitiesCount > 0
+                  ? <span className="text-rose-600 font-semibold">{m.overdueActivitiesCount} overdue</span>
+                  : 'No overdue activities'}
+              </p>
+            </div>
+            <div className="p-2.5 rounded-lg border bg-indigo-50 text-indigo-600 border-indigo-100">
+              <Clock className="w-5 h-5" />
+            </div>
+          </div>
+          <ProgressBar
+            value={m.upcomingAssessmentsCount ? 70 : 0}
+            color="bg-indigo-500"
+            height="h-1.5"
+          />
+        </div>
+
+        {/* Support Indicators */}
+        <div className={`bg-white rounded-xl border p-5 shadow-sm hover:shadow transition-shadow ${support.length > 0 ? 'border-rose-200' : 'border-slate-200'}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">At-Risk Learners</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1.5">{support.length}</p>
+              <p className="text-xs text-slate-500 mt-1">Below 50% milestone</p>
+            </div>
+            <div className={`p-2.5 rounded-lg border ${support.length > 0 ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+              <AlertCircle className="w-5 h-5" />
+            </div>
+          </div>
+          <ProgressBar
+            value={m.enrolledStudentsCount ? (support.length / m.enrolledStudentsCount) * 100 : 0}
+            color="bg-rose-400"
+            height="h-1.5"
+          />
+        </div>
+      </div>
+
+      {/* ── Quick Actions ─────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <SectionHeader title="Quick Actions" subtitle="Jump to common instructor tasks" />
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+          <QuickActionBtn to="/instructor/assignments"  icon={FileText}      label="New Assignment"   color="blue"    />
+          <QuickActionBtn to="/instructor/assessments"  icon={ClipboardCheck} label="New Quiz"        color="indigo"  />
+          <QuickActionBtn to="/instructor/submissions"  icon={Award}          label="Grade Work"      color="amber"   />
+          <QuickActionBtn to="/instructor/courses"      icon={BookOpen}       label="Author Content"  color="emerald" />
+          <QuickActionBtn to="/instructor/announcements"icon={Send}           label="Announcement"    color="violet"  />
+          <QuickActionBtn to="/instructor/gradebook"    icon={BarChart3}      label="Gradebook"       color="rose"    />
+        </div>
+      </div>
+
+      {/* ── Main two-column grid ──────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Left col (2/3) */}
+        <div className="lg:col-span-2 space-y-6">
+
+          {/* Class Completion Bar Chart */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <SectionHeader
+              title="Class Completion Statistics"
+              subtitle="Average curriculum progress (%) across your assigned sections"
+              linkTo="/instructor/reports"
+              linkLabel="Full report"
+            />
+            {completionStats.length === 0 ? (
+              <div className="h-48 flex items-center justify-center text-xs text-slate-400">No class data yet.</div>
             ) : (
-              (d.pendingSubmissions || []).map((sub) => (
-                <div
-                  key={sub.id}
-                  className="p-3 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-between text-xs"
-                >
-                  <div>
-                    <p className="font-bold text-slate-900">
-                      {sub.student?.firstName} {sub.student?.lastName} — {sub.assignment?.title}
-                    </p>
-                    {sub.flaggedForInstructorReview && (
-                      <p className="text-amber-700 font-medium mt-0.5">
-                        ⚑ Flagged by TA: {sub.flagReason}
+              <div className="h-52">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={completionStats} barCategoryGap="30%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                    <XAxis dataKey="sectionCode" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} unit="%" />
+                    <Tooltip
+                      contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+                      formatter={(v) => [`${v}%`, 'Avg Progress']}
+                    />
+                    <Bar dataKey="averageProgress" radius={[6, 6, 0, 0]}>
+                      {completionStats.map((_, i) => (
+                        <Cell key={i} fill={PROGRESS_COLORS[i % PROGRESS_COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {/* Class cards below chart */}
+            {classes.length > 0 && (
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {classes.slice(0, 4).map((cls) => {
+                  const stat = completionStats.find((s) => s.classId === cls.id);
+                  const prog = stat?.averageProgress ?? 0;
+                  return (
+                    <div key={cls.id} className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-white transition-colors">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="text-xs font-bold text-slate-900 truncate">{cls.sectionCode}</p>
+                        <span className="text-[11px] font-mono font-bold text-blue-700">{prog}%</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 truncate mb-2">
+                        {cls.courseOffering?.course?.title || cls.name}
                       </p>
-                    )}
-                  </div>
-                  <StatusBadge status={sub.status} />
-                </div>
-              ))
+                      <ProgressBar value={prog} color={prog < 40 ? 'bg-rose-400' : prog < 70 ? 'bg-amber-400' : 'bg-emerald-500'} />
+                      <p className="text-[11px] text-slate-400 mt-1.5">{cls.memberships?.length ?? 0} students enrolled</p>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
+
+          {/* Pending Submissions */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <SectionHeader
+              title="Pending Submissions & TA Flags"
+              subtitle="Student work awaiting instructor evaluation"
+              linkTo="/instructor/submissions"
+              linkLabel="Open queue"
+            />
+            {pendingSubs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-slate-400 gap-2">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                <p className="text-xs font-medium">All caught up — no pending submissions.</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {pendingSubs.map((sub) => (
+                  <div
+                    key={sub.id}
+                    className={`p-3 rounded-lg border flex items-center justify-between gap-3 text-xs transition-colors hover:bg-slate-50 ${
+                      sub.flaggedForInstructorReview
+                        ? 'bg-amber-50/60 border-amber-200'
+                        : 'bg-white border-slate-200'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        {sub.flaggedForInstructorReview && (
+                          <Flag className="w-3 h-3 text-amber-500 shrink-0" />
+                        )}
+                        <p className="font-semibold text-slate-900 truncate">
+                          {sub.student?.firstName} {sub.student?.lastName}
+                        </p>
+                      </div>
+                      <p className="text-slate-500 truncate mt-0.5">{sub.assignment?.title}</p>
+                      {sub.flaggedForInstructorReview && sub.flagReason && (
+                        <p className="text-amber-700 font-medium mt-0.5 text-[11px]">
+                          TA note: {sub.flagReason}
+                        </p>
+                      )}
+                    </div>
+                    <div className="shrink-0 flex flex-col items-end gap-1.5">
+                      <StatusBadge status={sub.status} />
+                      {sub.assignment?.dueDate && (
+                        <span className="text-[10px] text-slate-400">
+                          Due {new Date(sub.assignment.dueDate).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </div>
+
+        {/* Right col (1/3) */}
+        <div className="space-y-6">
+
+          {/* Assigned Courses */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <SectionHeader
+              title="Assigned Courses"
+              subtitle={`${courses.length} course${courses.length !== 1 ? 's' : ''}`}
+              linkTo="/instructor/courses"
+              linkLabel="Studio"
+            />
+            {courses.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 text-center">No courses assigned yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {courses.slice(0, 5).map((c) => (
+                  <div key={c.id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 transition-colors">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                      <BookOpen className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-slate-900 truncate">{c.title}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{c.code}</p>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Upcoming Assessments */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <SectionHeader
+              title="Upcoming Assessments"
+              subtitle="Scheduled quizzes & exams"
+              linkTo="/instructor/assessments"
+              linkLabel="Manage"
+            />
+            {assessments.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 text-center">No assessments scheduled.</p>
+            ) : (
+              <div className="space-y-2">
+                {assessments.slice(0, 5).map((a) => {
+                  const isOverdue = a.closeDate && new Date(a.closeDate) < new Date();
+                  return (
+                    <div key={a.id} className={`p-2.5 rounded-lg border text-xs ${isOverdue ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="font-semibold text-slate-900 truncate">{a.title}</p>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className={`text-[11px] font-medium ${isOverdue ? 'text-rose-600' : 'text-slate-500'}`}>
+                          {a.closeDate
+                            ? `${isOverdue ? 'Closed' : 'Closes'} ${new Date(a.closeDate).toLocaleDateString()}`
+                            : 'No close date'}
+                        </span>
+                        <StatusBadge status={a.status || 'draft'} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Recent Discussion Activity */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <SectionHeader
+              title="Recent Discussions"
+              subtitle="Latest class questions & threads"
+              linkTo="/instructor/discussions"
+              linkLabel="View all"
+            />
+            {discussions.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 text-center">No discussion activity yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {discussions.slice(0, 5).map((t) => (
+                  <div key={t.id} className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs hover:bg-white transition-colors">
+                    <div className="flex items-start gap-2">
+                      <MessageSquare className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${t.isResolved ? 'text-emerald-500' : 'text-blue-500'}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-900 truncate">{t.title}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {t.author?.firstName} {t.author?.lastName} ·{' '}
+                          {t.isResolved
+                            ? <span className="text-emerald-600 font-medium">Resolved</span>
+                            : <span className="text-amber-600 font-medium">Open</span>}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
 
-      {/* Students who may need additional support */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-        <h2 className="text-base font-bold text-slate-900">
-          Learner Progress Indicators for Instructor Review
-        </h2>
-        <p className="text-xs text-slate-500 mb-4">
-          Informational indicators highlighting students below the 50% curriculum milestone so instructors can offer timely academic support.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {(d.studentsNeedingSupport || []).map((st, idx) => (
-            <div key={idx} className="p-3.5 rounded-lg bg-amber-50/50 border border-amber-200 text-xs space-y-1">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-900">{st.studentName}</span>
-                <span className="font-mono font-bold text-amber-800">{st.progressPercentage}%</span>
+      {/* ── At-Risk Learners ──────────────────────────────────── */}
+      {support.length > 0 && (
+        <div className="bg-white rounded-xl border border-rose-200 p-5 shadow-sm">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <AlertCircle className="w-4 h-4 text-rose-500" />
+                <h2 className="text-sm font-bold text-slate-900">At-Risk Learner Indicators</h2>
               </div>
-              <p className="text-slate-600">{st.studentEmail}</p>
-              <p className="text-[11px] text-amber-900">{st.indicatorNote}</p>
+              <p className="text-xs text-slate-500">
+                Students below 50% curriculum completion — consider proactive outreach or check-ins.
+              </p>
             </div>
-          ))}
+            <Link to="/instructor/gradebook" className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline shrink-0">
+              Gradebook <ArrowUpRight className="w-3 h-3" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {support.map((st, idx) => (
+              <div key={idx} className="p-3.5 rounded-lg bg-rose-50/60 border border-rose-200 text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-900 truncate">{st.studentName}</span>
+                  <span className={`font-mono font-bold text-sm ${st.progressPercentage < 25 ? 'text-rose-700' : 'text-amber-700'}`}>
+                    {st.progressPercentage}%
+                  </span>
+                </div>
+                <ProgressBar
+                  value={st.progressPercentage}
+                  color={st.progressPercentage < 25 ? 'bg-rose-400' : 'bg-amber-400'}
+                />
+                <p className="text-slate-500 truncate">{st.studentEmail}</p>
+                <p className="text-[11px] text-slate-600 leading-relaxed">{st.indicatorNote}</p>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ── Progress Distribution (Pie) ───────────────────────── */}
+      {progressBuckets.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+          <SectionHeader
+            title="Student Progress Distribution"
+            subtitle="Breakdown of learner progress across all assigned classes"
+          />
+          <div className="flex flex-col sm:flex-row items-center gap-6">
+            <div className="h-44 w-44 shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={progressBuckets} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={3} dataKey="value">
+                    {progressBuckets.map((_, i) => (
+                      <Cell key={i} fill={PROGRESS_COLORS[i % PROGRESS_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex-1 grid grid-cols-2 gap-3">
+              {progressBuckets.map((b, i) => (
+                <div key={i} className="flex items-center gap-2.5 p-3 rounded-lg bg-slate-50 border border-slate-200">
+                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: PROGRESS_COLORS[i % PROGRESS_COLORS.length] }} />
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900">{b.name}</p>
+                    <p className="text-[11px] text-slate-500">{b.value} student{b.value !== 1 ? 's' : ''}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
