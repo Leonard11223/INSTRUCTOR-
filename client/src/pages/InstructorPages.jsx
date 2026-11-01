@@ -110,11 +110,20 @@ export function InstructorDashboardPage() {
   const courses = d.assignedCourses || [];
   const flagged = pending.filter((s) => s.flaggedForInstructorReview);
 
+  // All 4 buckets use per-student progress records (support only covers <50%;
+  // students ≥50% come from class membership counts minus the at-risk set).
+  const totalStudents = m.enrolledStudentsCount ?? 0;
+  const atRiskCount   = support.length;
+  const aboveFiftyCount = Math.max(0, totalStudents - atRiskCount);
+  // Approximate the upper buckets from class-level averages when student-level
+  // data isn't individually available above 50%.
+  const highPassCount = stats.filter((c) => c.averageProgress > 75).length;
+  const midPassCount  = Math.max(0, stats.filter((c) => c.averageProgress > 50).length - highPassCount);
   const buckets = [
     { name: '0–25%',  value: support.filter((s) => s.progressPercentage <= 25).length },
     { name: '26–50%', value: support.filter((s) => s.progressPercentage > 25 && s.progressPercentage <= 50).length },
-    { name: '51–75%', value: stats.filter((c) => c.averageProgress > 50 && c.averageProgress <= 75).length },
-    { name: '76–100%',value: stats.filter((c) => c.averageProgress > 75).length },
+    { name: '51–75%', value: midPassCount },
+    { name: '76–100%',value: highPassCount },
   ].filter((b) => b.value > 0);
 
   return (
@@ -249,11 +258,11 @@ export function InstructorDashboardPage() {
             {courses.length === 0 ? <p className="text-xs text-slate-400 py-4 text-center">No courses assigned.</p> : (
               <div className="space-y-2">
                 {courses.slice(0, 5).map((c) => (
-                  <div key={c.id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 transition-colors">
+                  <Link key={c.id} to="/instructor/courses" className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 transition-colors">
                     <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><BookOpen className="w-4 h-4 text-blue-600" /></div>
                     <div className="min-w-0 flex-1"><p className="text-xs font-semibold text-slate-900 truncate">{c.title}</p><p className="text-[11px] text-slate-500 truncate">{c.code}</p></div>
                     <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}
@@ -374,9 +383,9 @@ export function InstructorCourseStudioPage() {
   const { data: cData } = useQuery({ queryKey: ['courses'], queryFn: () => lmsApi.listCourses() });
   const { data: dData, isLoading } = useQuery({ queryKey: ['course', selId], queryFn: () => lmsApi.getCourseById(selId), enabled: Boolean(selId) });
 
-  const save = (fn, msg, key, close) => async (e) => {
+  const save = (fn, msg, close) => async (e) => {
     e.preventDefault();
-    try { await fn(); addToast(msg); close(false); queryClient.invalidateQueries({ queryKey: [key] }); }
+    try { await fn(); addToast(msg); close(false); queryClient.invalidateQueries({ queryKey: ['course', selId] }); }
     catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
 
@@ -487,7 +496,7 @@ export function InstructorCourseStudioPage() {
       )}
 
       <ModalDialog isOpen={modOpen} onClose={() => setModOpen(false)} title="Create Module">
-        <form onSubmit={save(() => lmsApi.createModule({ ...modForm, courseId: Number(selId) }), 'Module added.', `course-${selId}`, setModOpen)} className="space-y-4 text-xs">
+        <form onSubmit={save(() => lmsApi.createModule({ ...modForm, courseId: Number(selId) }), 'Module added.', setModOpen)} className="space-y-4 text-xs">
           <div><label className="block font-semibold mb-1.5">Title</label><input required value={modForm.title} onChange={(e) => setModForm({ ...modForm, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
           <div><label className="block font-semibold mb-1.5">Description</label><textarea rows={3} value={modForm.description} onChange={(e) => setModForm({ ...modForm, description: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
           <div className="grid grid-cols-2 gap-3">
@@ -499,7 +508,7 @@ export function InstructorCourseStudioPage() {
       </ModalDialog>
 
       <ModalDialog isOpen={lesOpen} onClose={() => setLesOpen(false)} title="Author Lesson" maxWidth="max-w-2xl">
-        <form onSubmit={save(() => lmsApi.createLesson({ ...lesForm, courseId: Number(selId) }), 'Lesson published.', `course-${selId}`, setLesOpen)} className="space-y-4 text-xs">
+        <form onSubmit={save(() => lmsApi.createLesson({ ...lesForm, courseId: Number(selId) }), 'Lesson published.', setLesOpen)} className="space-y-4 text-xs">
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block font-semibold mb-1.5">Module</label>
               <select value={lesForm.moduleId} onChange={(e) => setLesForm({ ...lesForm, moduleId: Number(e.target.value) })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
@@ -526,7 +535,7 @@ export function InstructorCourseStudioPage() {
       </ModalDialog>
 
       <ModalDialog isOpen={resOpen} onClose={() => setResOpen(false)} title="Attach Resource">
-        <form onSubmit={save(async () => { const fd = new FormData(); Object.entries({ courseId: String(selId), ...resForm }).forEach(([k, v]) => fd.append(k, v)); await lmsApi.createResource(fd); }, 'Resource attached.', `course-${selId}`, setResOpen)} className="space-y-4 text-xs">
+        <form onSubmit={save(async () => { const fd = new FormData(); Object.entries({ courseId: String(selId), ...resForm }).forEach(([k, v]) => fd.append(k, v)); await lmsApi.createResource(fd); }, 'Resource attached.', setResOpen)} className="space-y-4 text-xs">
           <div><label className="block font-semibold mb-1.5">Title</label><input required value={resForm.title} onChange={(e) => setResForm({ ...resForm, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
           <div><label className="block font-semibold mb-1.5">Type</label>
             <select value={resForm.resourceType} onChange={(e) => setResForm({ ...resForm, resourceType: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
@@ -552,7 +561,7 @@ export function InstructorAssignmentsPage() {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({
-    classId: 1, courseId: 1, title: '', assignmentType: 'laboratory',
+    classId: '', courseId: '', title: '', assignmentType: 'laboratory',
     instructions: '', dueDate: '', maxScore: 100, starterCode: '// Starter\n',
     rubricCriteria: [
       { criterionName: 'Functional Accuracy', maxPoints: 50 },
@@ -560,14 +569,18 @@ export function InstructorAssignmentsPage() {
     ]
   });
 
+  const { data: classesData } = useQuery({ queryKey: ['classes'], queryFn: lmsApi.listClasses });
+  const { data: coursesData } = useQuery({ queryKey: ['courses'], queryFn: () => lmsApi.listCourses() });
   const { data, isLoading } = useQuery({ queryKey: ['assignments'], queryFn: () => lmsApi.listAssignments() });
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    try { await lmsApi.createAssignment(form); addToast('Assignment published.'); setCreateOpen(false); queryClient.invalidateQueries({ queryKey: ['assignments'] }); }
+    try { await lmsApi.createAssignment({ ...form, classId: Number(form.classId), courseId: Number(form.courseId) }); addToast('Assignment published.'); setCreateOpen(false); queryClient.invalidateQueries({ queryKey: ['assignments'] }); }
     catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
 
+  const allClasses = classesData?.data?.classes || [];
+  const allCourses = coursesData?.data?.courses || [];
   const all = data?.data?.assignments || [];
   const typeBadge = { laboratory: 'bg-violet-50 text-violet-700 border-violet-200', programming: 'bg-blue-50 text-blue-700 border-blue-200', network_config: 'bg-emerald-50 text-emerald-700 border-emerald-200', project_milestone: 'bg-amber-50 text-amber-700 border-amber-200' };
   const filtered = all.filter((a) => (filter === 'all' || a.assignmentType === filter) && (!search || a.title.toLowerCase().includes(search.toLowerCase())));
@@ -642,6 +655,18 @@ export function InstructorAssignmentsPage() {
 
       <ModalDialog isOpen={createOpen} onClose={() => setCreateOpen(false)} title="Create Assignment / Lab" maxWidth="max-w-xl">
         <form onSubmit={handleCreate} className="space-y-4 text-xs">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block font-semibold mb-1.5">Class Section</label>
+              <select required value={form.classId} onChange={(e) => setForm({ ...form, classId: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                <option value="">— Select class —</option>
+                {allClasses.map((c) => <option key={c.id} value={c.id}>{c.sectionCode}</option>)}
+              </select></div>
+            <div><label className="block font-semibold mb-1.5">Course</label>
+              <select required value={form.courseId} onChange={(e) => setForm({ ...form, courseId: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                <option value="">— Select course —</option>
+                {allCourses.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.title}</option>)}
+              </select></div>
+          </div>
           <div><label className="block font-semibold mb-1.5">Title</label><input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block font-semibold mb-1.5">Type</label>
@@ -829,22 +854,24 @@ export function InstructorAssessmentsPage() {
   const [qOpen, setQOpen] = useState(false);
   const [tab, setTab] = useState('assessments');
   const [qForm, setQForm] = useState({
-    questionBankId: 1, courseId: 1, topic: 'Network Security',
+    questionBankId: '', courseId: '', topic: 'Network Security',
     questionType: 'multiple_choice', difficulty: 'Medium', prompt: '', points: 10,
     options: [{ optionText: 'Option A (Correct)', isCorrect: true }, { optionText: 'Option B', isCorrect: false }, { optionText: 'Option C', isCorrect: false }]
   });
 
   const { data: banksData, isLoading } = useQuery({ queryKey: ['question-banks'], queryFn: () => lmsApi.listQuestionBanks() });
   const { data: assessData } = useQuery({ queryKey: ['assessments'], queryFn: () => lmsApi.listAssessments() });
+  const { data: coursesData } = useQuery({ queryKey: ['courses'], queryFn: () => lmsApi.listCourses() });
 
   const handleQ = async (e) => {
     e.preventDefault();
-    try { await lmsApi.createQuestion(qForm); addToast('Question added.'); setQOpen(false); queryClient.invalidateQueries({ queryKey: ['question-banks'] }); }
+    try { await lmsApi.createQuestion({ ...qForm, questionBankId: Number(qForm.questionBankId), courseId: Number(qForm.courseId) }); addToast('Question added.'); setQOpen(false); queryClient.invalidateQueries({ queryKey: ['question-banks'] }); }
     catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
 
   const banks = banksData?.data?.questionBanks || [];
   const assessments = assessData?.data?.assessments || [];
+  const allCourses = coursesData?.data?.courses || [];
   const diffCls = { Easy: 'bg-emerald-50 text-emerald-700 border-emerald-200', Medium: 'bg-amber-50 text-amber-700 border-amber-200', Hard: 'bg-rose-50 text-rose-700 border-rose-200' };
 
   return (
@@ -932,6 +959,18 @@ export function InstructorAssessmentsPage() {
 
       <ModalDialog isOpen={qOpen} onClose={() => setQOpen(false)} title="Add Question to Bank">
         <form onSubmit={handleQ} className="space-y-4 text-xs">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block font-semibold mb-1.5">Question Bank</label>
+              <select required value={qForm.questionBankId} onChange={(e) => setQForm({ ...qForm, questionBankId: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                <option value="">— Select bank —</option>
+                {banks.map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}
+              </select></div>
+            <div><label className="block font-semibold mb-1.5">Course</label>
+              <select required value={qForm.courseId} onChange={(e) => setQForm({ ...qForm, courseId: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                <option value="">— Select course —</option>
+                {allCourses.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.title}</option>)}
+              </select></div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block font-semibold mb-1.5">Type</label>
               <select value={qForm.questionType} onChange={(e) => setQForm({ ...qForm, questionType: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
