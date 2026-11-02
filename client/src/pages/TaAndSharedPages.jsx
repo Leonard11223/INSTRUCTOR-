@@ -698,15 +698,75 @@ export function SharedMessagesPage() {
 }
 
 export function SharedReportsPage() {
-  const [reportType, setReportType] = useState('enrollments');
-  const [classId, setClassId] = useState(1);
+  const { addToast } = useToast();
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['reports', reportType, classId],
-    queryFn: () => lmsApi.getReport({ type: reportType, classId, format: 'json' })
+  // ── Filters ───────────────────────────────────────────────────────────────
+  const [reportType,  setReportType]  = useState('enrollments');
+  const [classId,     setClassId]     = useState('');
+  const [semesterId,  setSemesterId]  = useState('');
+  const [searchText,  setSearchText]  = useState('');
+
+  // Report types that need a class selector
+  const NEEDS_CLASS    = ['gradebook', 'submissions', 'certificates'];
+  // Report types that can optionally filter by semester
+  const NEEDS_SEMESTER = ['enrollments', 'classSummary'];
+
+  // ── Dependent data for filter selectors ───────────────────────────────────
+  const { data: classesData } = useQuery({
+    queryKey: ['classes'],
+    queryFn: lmsApi.listClasses
+  });
+  const { data: semestersData } = useQuery({
+    queryKey: ['semesters'],
+    queryFn: lmsApi.listSemesters
+  });
+
+  const classes   = classesData?.data?.classes   || [];
+  const semesters = semestersData?.data?.semesters || [];
+
+  // Auto-select first class when type changes to one requiring a class
+  React.useEffect(() => {
+    if (NEEDS_CLASS.includes(reportType) && classId === '' && classes.length > 0) {
+      setClassId(classes[0].id);
+    }
+    setSearchText('');
+  }, [reportType, classes]);
+
+  // ── Build query params ────────────────────────────────────────────────────
+  const queryParams = { type: reportType, format: 'json' };
+  if (classId    && NEEDS_CLASS.includes(reportType))    queryParams.classId    = classId;
+  if (classId    && !NEEDS_CLASS.includes(reportType))   queryParams.classId    = classId;
+  if (semesterId && NEEDS_SEMESTER.includes(reportType)) queryParams.semesterId = semesterId;
+
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['reports', reportType, classId, semesterId],
+    queryFn: () => lmsApi.getReport(queryParams),
+    retry: 1
   });
 
   const report = data?.data || {};
+
+  // ── Filtered rows ─────────────────────────────────────────────────────────
+  const filteredRows = React.useMemo(() => {
+    const rows = report.rows || [];
+    if (!searchText.trim()) return rows;
+    const term = searchText.toLowerCase();
+    return rows.filter((row) =>
+      Object.values(row).some((val) =>
+        String(val ?? '').toLowerCase().includes(term)
+      )
+    );
+  }, [report.rows, searchText]);
+
+  // ── Build download URL (browser navigation, sends session cookie) ─────────
+  const buildDownloadUrl = (fmt) => {
+    const p = new URLSearchParams({ type: reportType, format: fmt });
+    if (classId)    p.set('classId',    classId);
+    if (semesterId) p.set('semesterId', semesterId);
+    return `/api/reports?${p.toString()}`;
+  };
+
+  const summary = report.summary || null;
 
   return (
     <div className="space-y-6">
@@ -716,70 +776,168 @@ export function SharedReportsPage() {
         subtitle="Generate tabular reports and export in CSV or Excel-compatible formats."
         actions={
           <>
-            <a
-              href={`/api/reports?type=${reportType}&classId=${classId}&format=csv`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg"
-            >
-              <Download className="w-4 h-4" />
-              Download CSV
+            <a href={buildDownloadUrl('csv')} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">
+              <Download className="w-4 h-4" /> Download CSV
             </a>
-            <a
-              href={`/api/reports?type=${reportType}&classId=${classId}&format=excel`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg"
-            >
-              <FileSpreadsheet className="w-4 h-4" />
-              Download Excel (.xls)
+            <a href={buildDownloadUrl('excel')} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg">
+              <FileSpreadsheet className="w-4 h-4" /> Download Excel
             </a>
           </>
         }
       />
 
-      <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-3">
-        <select
-          value={reportType}
-          onChange={(e) => setReportType(e.target.value)}
-          className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white font-semibold"
-        >
-          <option value="enrollments">Student Enrollment & Class Roster Report</option>
-          <option value="gradebook">Class Weighted Gradebook Report</option>
-          <option value="submissions">Assignment Submissions Report</option>
-          <option value="departments">Department & Course Summary Report</option>
-          <option value="users">Platform User Directory Report</option>
-        </select>
+      {/* ── Filter bar ──────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-3 items-end">
+        {/* Report type */}
+        <div className="flex flex-col gap-1 text-xs">
+          <label className="font-semibold text-slate-600">Report Type</label>
+          <select value={reportType} onChange={(e) => { setReportType(e.target.value); setClassId(''); setSemesterId(''); }}
+            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-medium min-w-[220px]">
+            <option value="enrollments">Student Enrollment & Roster</option>
+            <option value="gradebook">Class Weighted Gradebook</option>
+            <option value="submissions">Assignment Submissions</option>
+            <option value="classSummary">Class Section Summary</option>
+            <option value="departments">Department & Course Summary</option>
+            <option value="certificates">Course Completion Certificates</option>
+            <option value="users">Platform User Directory</option>
+          </select>
+        </div>
+
+        {/* Class picker — shown for types that require a class */}
+        {(NEEDS_CLASS.includes(reportType) || (!NEEDS_SEMESTER.includes(reportType) && !['departments','users'].includes(reportType))) && (
+          <div className="flex flex-col gap-1 text-xs">
+            <label className="font-semibold text-slate-600">
+              Class Section {NEEDS_CLASS.includes(reportType) ? '' : <span className="text-slate-400 font-normal">(optional)</span>}
+            </label>
+            <select value={classId} onChange={(e) => setClassId(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-medium min-w-[200px]">
+              {!NEEDS_CLASS.includes(reportType) && <option value="">— All Classes —</option>}
+              {NEEDS_CLASS.includes(reportType) && classes.length === 0 && <option value="">— No classes —</option>}
+              {classes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.sectionCode} — {c.courseOffering?.course?.code || c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Semester picker — shown for types that can filter by semester */}
+        {NEEDS_SEMESTER.includes(reportType) && (
+          <div className="flex flex-col gap-1 text-xs">
+            <label className="font-semibold text-slate-600">Semester <span className="text-slate-400 font-normal">(optional)</span></label>
+            <select value={semesterId} onChange={(e) => setSemesterId(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-medium min-w-[180px]">
+              <option value="">— All Semesters —</option>
+              {semesters.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Search within results */}
+        <div className="flex flex-col gap-1 text-xs">
+          <label className="font-semibold text-slate-600">Search in Results</label>
+          <input value={searchText} onChange={(e) => setSearchText(e.target.value)}
+            placeholder="Filter rows..." type="search"
+            className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs min-w-[160px]" />
+        </div>
       </div>
 
-      {isLoading ? (
-        <LoadingState />
-      ) : (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-900">{report.reportTitle}</h2>
-            <span className="text-xs text-slate-500">{(report.rows || []).length} records</span>
+      {/* ── Error state ──────────────────────────────────────────────────── */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-5 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-red-800">Failed to generate report</p>
+            <p className="text-xs text-red-600 mt-0.5">
+              {error?.response?.data?.message || error?.message || 'An unexpected error occurred.'}
+            </p>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
-                <tr>
-                  {(report.headers || []).map((h) => (
-                    <th key={h.key} className="px-4 py-3">{h.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {(report.rows || []).map((row, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50">
+          <button onClick={refetch} className="px-3 py-1.5 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg">
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* ── Gradebook summary stats ───────────────────────────────────────── */}
+      {!isLoading && !error && summary && reportType === 'gradebook' && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <StatCard title="Total Students"   value={summary.totalStudents}    subtitle="In class section" icon={Users}         accent="blue"   />
+          <StatCard title="Passing"          value={summary.passingStudents}  subtitle={`${summary.passingRate ?? 0}% pass rate`} icon={CheckCircle2} accent="emerald" />
+          <StatCard title="Failing"          value={summary.failingStudents}  subtitle={`Below ${summary.passingScore}%`}   icon={AlertTriangle} accent="amber"   />
+          <StatCard title="Avg. Standing"    value={summary.averageStanding !== null ? `${summary.averageStanding}%` : '—'} subtitle="Weighted average" icon={FileSpreadsheet} accent="indigo" />
+        </div>
+      )}
+
+      {/* ── Report table ─────────────────────────────────────────────────── */}
+      {isLoading ? (
+        <LoadingState label="Generating report…" />
+      ) : !error && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">{report.reportTitle || 'Report'}</h2>
+              {report.generatedAt && (
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Generated {new Date(report.generatedAt).toLocaleString()}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              {searchText && (
+                <span className="text-blue-600 font-semibold">
+                  {filteredRows.length} / {(report.rows || []).length} rows
+                </span>
+              )}
+              {!searchText && (
+                <span>{(report.rows || []).length} records</span>
+              )}
+            </div>
+          </div>
+
+          {(report.rows || []).length === 0 ? (
+            <div className="px-5 py-12 text-center text-slate-400 text-sm">
+              No records found for the selected filters.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
+                  <tr>
                     {(report.headers || []).map((h) => (
-                      <td key={h.key} className="px-4 py-3 text-slate-800">{String(row[h.key] ?? '—')}</td>
+                      <th key={h.key} className="px-4 py-3 whitespace-nowrap">{h.label}</th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {filteredRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={(report.headers || []).length} className="px-4 py-8 text-center text-slate-400">
+                        No rows match "{searchText}".
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRows.map((row, idx) => (
+                      <tr key={idx} className={`hover:bg-slate-50 ${
+                        reportType === 'gradebook' && row.isPassing === 'No' ? 'bg-red-50/40' : ''
+                      }`}>
+                        {(report.headers || []).map((h) => (
+                          <td key={h.key} className="px-4 py-3 text-slate-800 whitespace-nowrap">
+                            {h.key === 'status' || h.key === 'finalGradesStatus'
+                              ? <StatusBadge status={String(row[h.key] ?? '')} />
+                              : String(row[h.key] ?? '—')}
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
