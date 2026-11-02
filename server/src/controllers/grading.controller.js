@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const { Op } = require('sequelize');
 const {
   sequelize,
   GradeCategory,
@@ -10,13 +9,9 @@ const {
   CourseOffering,
   Course,
   Department,
-  Program,
-  AcademicYear,
-  Semester,
   Certificate,
   Submission,
   Assignment,
-  InstructorAssignment,
   User
 } = require('../models');
 const { AppError } = require('../middleware/error.middleware');
@@ -291,30 +286,11 @@ async function approveOrReturnFinalGrades(req, res, next) {
     const classId = Number(req.params.classId);
     const { decision = 'approved', remarks } = req.body;
 
-    const classSection = await ClassSection.findByPk(classId, {
-      include: [
-        {
-          model: CourseOffering,
-          as: 'courseOffering',
-          include: [{ model: Course, as: 'course', attributes: ['id', 'code', 'title'] }]
-        }
-      ],
-      transaction: t
-    });
+    const classSection = await ClassSection.findByPk(classId, { transaction: t });
     if (!classSection) throw new AppError('Class section not found.', 404);
 
     if (!['approved', 'published', 'returned'].includes(decision)) {
       throw new AppError('Decision must be approved, published, or returned.', 400);
-    }
-
-    // Guard: can only approve/return classes that are submitted_for_approval
-    // (allow re-approval of already approved, but not draft/in_progress/active)
-    if (decision !== 'returned' && !['submitted_for_approval', 'returned'].includes(classSection.finalGradesStatus)) {
-      throw new AppError(
-        `Cannot approve grades for "${classSection.sectionCode}" — current status is "${classSection.finalGradesStatus}". Grades must be submitted for approval first.`,
-        409,
-        'INVALID_GRADES_STATUS'
-      );
     }
 
     await classSection.update({
@@ -325,23 +301,15 @@ async function approveOrReturnFinalGrades(req, res, next) {
 
     if (decision === 'approved' || decision === 'published') {
       const gb = await calculateClassGradebook(classId);
-
       for (const s of gb.students) {
-        // Write final grades back to class membership
         await ClassMembership.update({
           finalNumericGrade: s.standingPercentage,
-          finalLetterGrade:  s.institutionalGrade,
-          remarks:           remarks || s.remarks
+          finalLetterGrade: s.institutionalGrade,
+          remarks: remarks || s.remarks
         }, {
           where: { classId, studentId: s.studentId },
           transaction: t
         });
-
-        // Promote individual Grade rows to approved_final
-        await Grade.update(
-          { status: 'approved_final' },
-          { where: { classId, studentId: s.studentId, status: ['published', 'submitted_final'] }, transaction: t }
-        );
       }
     }
 
@@ -349,34 +317,13 @@ async function approveOrReturnFinalGrades(req, res, next) {
 
     await recordAudit({
       req,
-      action:     `FINAL_GRADES_${decision.toUpperCase()}`,
-      category:   'grade',
-      severity:   'info',
+      action: `FINAL_GRADES_${decision.toUpperCase()}`,
+      category: 'grade',
+      severity: 'info',
       entityType: 'ClassSection',
-      entityId:   classId,
-      metadata:   { decision, remarks }
+      entityId: classId,
+      metadata: { decision, remarks }
     });
-
-    // Notify all assigned instructors of the outcome
-    const assignments = await InstructorAssignment.findAll({ where: { classId } });
-    const courseCode = classSection.courseOffering?.course?.code || classSection.sectionCode;
-
-    for (const ia of assignments) {
-      const notifTitle = decision === 'returned'
-        ? `Grades Returned for Revision: ${classSection.sectionCode}`
-        : `Grades Approved: ${classSection.sectionCode}`;
-      const notifMsg = decision === 'returned'
-        ? `Final grades for ${courseCode} — ${classSection.sectionCode} have been returned. Reason: ${remarks || 'No remarks provided.'}`
-        : `Final grades for ${courseCode} — ${classSection.sectionCode} have been approved and recorded.`;
-
-      await createNotification({
-        userId: ia.instructorId,
-        type: 'grade',
-        title: notifTitle,
-        message: notifMsg,
-        destinationUrl: '/instructor/grades'
-      });
-    }
 
     return res.status(200).json({
       success: true,
@@ -520,93 +467,46 @@ function toCsvString(headers, rows) {
 
 async function generateReport(req, res, next) {
   try {
-    const {
-      type       = 'enrollments',
-      format     = 'json',
-      classId,
-      semesterId,
-      limit      = 1000,
-      offset     = 0
-    } = req.query;
-
-    const rowLimit  = Math.min(Number(limit)  || 1000, 5000); // safety cap at 5000
-    const rowOffset = Number(offset) || 0;
+    const { type = 'enrollments', format = 'json', classId } = req.query;
 
     let reportTitle = 'Institutional Academic Report';
-    let headers     = [];
-    let rows        = [];
-    let summary     = null; // optional summary stats for JSON responses
+    let headers = [];
+    let rows = [];
 
-    // ── Users ─────────────────────────────────────────────────────────────
     if (type === 'users') {
       if (!req.user.roles.includes('super_admin') && !req.user.roles.includes('academic_admin')) {
         throw new AppError('Forbidden: Insufficient permissions for user report.', 403);
       }
       reportTitle = 'Platform Users & Role Directory';
       headers = [
-        { key: 'id',         label: 'ID' },
-        { key: 'fullName',   label: 'Full Name' },
-        { key: 'email',      label: 'Email' },
+        { key: 'id', label: 'ID' },
+        { key: 'fullName', label: 'Full Name' },
+        { key: 'email', label: 'Email' },
         { key: 'identifier', label: 'ID Number' },
-        { key: 'status',     label: 'Status' }
+        { key: 'status', label: 'Status' }
       ];
-      const users = await User.findAll({
-        order: [['id', 'ASC']],
-        limit: rowLimit,
-        offset: rowOffset
-      });
+      const users = await User.findAll({ order: [['id', 'ASC']] });
       rows = users.map((u) => ({
-        id:         u.id,
-        fullName:   `${u.firstName} ${u.lastName}`,
-        email:      u.email,
+        id: u.id,
+        fullName: `${u.firstName} ${u.lastName}`,
+        email: u.email,
         identifier: u.studentNumber || u.employeeNumber || 'N/A',
-        status:     u.status
+        status: u.status
       }));
-
-    // ── Gradebook (requires classId) ──────────────────────────────────────
     } else if (type === 'gradebook' && classId) {
-      const cs = await ClassSection.findByPk(Number(classId), {
-        include: [{ model: CourseOffering, as: 'courseOffering', include: [
-          { model: Course,   as: 'course',   attributes: ['id', 'code', 'title'] },
-          { model: Semester, as: 'semester', attributes: ['id', 'name', 'code'] }
-        ]}]
-      });
       await verifyClassAccess(req.user, classId, { allowAdmin: true, allowInstructor: true });
-      const semName  = cs?.courseOffering?.semester?.name  || '';
-      const courseCode = cs?.courseOffering?.course?.code  || classId;
-      reportTitle = `Gradebook — ${cs?.sectionCode || `Class #${classId}`}${semName ? ` · ${semName}` : ''}`;
+      reportTitle = `Class Gradebook Report (Class #${classId})`;
       const gb = await calculateClassGradebook(Number(classId));
       headers = [
-        { key: 'studentNumber',      label: 'Student Number' },
-        { key: 'studentName',        label: 'Student Name' },
-        { key: 'studentEmail',       label: 'Email' },
-        { key: 'enrollmentStatus',   label: 'Enrollment Status' },
-        { key: 'standingPercentage', label: 'Standing (%)' },
-        { key: 'institutionalGrade', label: 'Equiv. Grade' },
-        { key: 'letterGrade',        label: 'Letter' },
-        { key: 'isPassing',          label: 'Passing?' },
-        { key: 'remarks',            label: 'Remarks' }
+        { key: 'studentNumber', label: 'Student Number' },
+        { key: 'studentName', label: 'Student Name' },
+        { key: 'studentEmail', label: 'Email' },
+        { key: 'standingPercentage', label: 'Weighted Standing (%)' },
+        { key: 'institutionalGrade', label: 'Equivalent Grade' },
+        { key: 'letterGrade', label: 'Letter' },
+        { key: 'remarks', label: 'Remarks' }
       ];
-      rows = gb.students.map((s) => ({
-        ...s,
-        isPassing: s.isPassing ? 'Yes' : (s.standingPercentage === null ? 'N/A' : 'No')
-      }));
-      const graded   = rows.filter((s) => s.standingPercentage !== null && s.standingPercentage !== undefined);
-      const passing  = graded.filter((s) => s.isPassing === 'Yes').length;
-      const avgScore = graded.length
-        ? Number((graded.reduce((a, s) => a + Number(s.standingPercentage || 0), 0) / graded.length).toFixed(2))
-        : null;
-      summary = {
-        totalStudents: rows.length,
-        gradedStudents: graded.length,
-        passingStudents: passing,
-        failingStudents: graded.length - passing,
-        averageStanding: avgScore,
-        passingRate: graded.length > 0 ? Number(((passing / graded.length) * 100).toFixed(1)) : null,
-        passingScore: gb.passingScore
-      };
-
-    // ── Submissions ────────────────────────────────────────────────────────
+      rows = gb.students;
     } else if (type === 'submissions') {
       reportTitle = 'Assignment Submissions Report';
       const where = {};
@@ -614,198 +514,46 @@ async function generateReport(req, res, next) {
       const subs = await Submission.findAll({
         where,
         include: [
-          { model: User,       as: 'student',    attributes: ['firstName', 'lastName', 'email', 'studentNumber'] },
-          { model: Assignment, as: 'assignment', attributes: ['title', 'maxScore', 'dueDate'] }
-        ],
-        order: [['submittedAt', 'DESC']],
-        limit: rowLimit,
-        offset: rowOffset
+          { model: User, as: 'student', attributes: ['firstName', 'lastName', 'email', 'studentNumber'] },
+          { model: Assignment, as: 'assignment', attributes: ['title', 'maxScore'] }
+        ]
       });
       headers = [
-        { key: 'studentNumber',   label: 'Student No.' },
-        { key: 'studentName',     label: 'Student' },
+        { key: 'studentName', label: 'Student' },
         { key: 'assignmentTitle', label: 'Assignment' },
-        { key: 'status',          label: 'Status' },
-        { key: 'score',           label: 'Score' },
-        { key: 'maxScore',        label: 'Max Score' },
-        { key: 'submittedAt',     label: 'Submitted At' }
+        { key: 'status', label: 'Status' },
+        { key: 'score', label: 'Score' },
+        { key: 'maxScore', label: 'Max Score' },
+        { key: 'submittedAt', label: 'Submitted At' }
       ];
       rows = subs.map((s) => ({
-        studentNumber:   s.student?.studentNumber || `STU-${s.studentId}`,
-        studentName:     s.student ? `${s.student.firstName} ${s.student.lastName}` : `Student #${s.studentId}`,
+        studentName: s.student ? `${s.student.firstName} ${s.student.lastName}` : `Student #${s.studentId}`,
         assignmentTitle: s.assignment?.title || '',
-        status:          s.status,
-        score:           s.score ?? 'Pending',
-        maxScore:        s.assignment?.maxScore ?? 100,
-        submittedAt:     s.submittedAt ? new Date(s.submittedAt).toLocaleDateString() : 'N/A'
+        status: s.status,
+        score: s.score ?? 'Pending',
+        maxScore: s.assignment?.maxScore ?? 100,
+        submittedAt: s.submittedAt ? new Date(s.submittedAt).toISOString() : 'N/A'
       }));
-
-    // ── Departments ────────────────────────────────────────────────────────
     } else if (type === 'departments') {
       reportTitle = 'Department & Course Summary Report';
-      const depts = await Department.findAll({
-        include: [
-          { model: Course,  as: 'courses',  attributes: ['id'] },
-          { model: Program, as: 'programs', attributes: ['id', 'code', 'name'] }
-        ],
-        order: [['code', 'ASC']]
-      });
+      const depts = await Department.findAll({ include: [{ model: Course, as: 'courses' }] });
       headers = [
-        { key: 'code',         label: 'Dept Code' },
-        { key: 'name',         label: 'Department Name' },
-        { key: 'headName',     label: 'Dept Head' },
-        { key: 'programCount', label: 'Programs' },
-        { key: 'courseCount',  label: 'Courses' },
-        { key: 'status',       label: 'Status' }
+        { key: 'code', label: 'Department Code' },
+        { key: 'name', label: 'Department Name' },
+        { key: 'headName', label: 'Department Head' },
+        { key: 'courseCount', label: 'Active Courses' }
       ];
       rows = depts.map((d) => ({
-        code:         d.code,
-        name:         d.name,
-        headName:     d.headName || 'TBA',
-        programCount: (d.programs || []).length,
-        courseCount:  (d.courses  || []).length,
-        status:       d.status
+        code: d.code,
+        name: d.name,
+        headName: d.headName || 'TBA',
+        courseCount: (d.courses || []).length
       }));
-
-    // ── Certificates ───────────────────────────────────────────────────────
-    } else if (type === 'certificates') {
-      reportTitle = 'Course Completion Certificates Report';
-      const certWhere = {};
-      if (classId) certWhere.classId = Number(classId);
-      const certs = await Certificate.findAll({
-        where: certWhere,
-        include: [
-          { model: User,         as: 'student',      attributes: ['firstName', 'lastName', 'email', 'studentNumber'] },
-          { model: ClassSection, as: 'classSection', attributes: ['id', 'sectionCode'] }
-        ],
-        order: [['issuedAt', 'DESC']],
-        limit: rowLimit,
-        offset: rowOffset
-      });
-      headers = [
-        { key: 'certificateCode', label: 'Certificate Code' },
-        { key: 'studentNumber',   label: 'Student No.' },
-        { key: 'recipientName',   label: 'Recipient Name' },
-        { key: 'email',           label: 'Email' },
-        { key: 'courseCode',      label: 'Course Code' },
-        { key: 'courseTitle',     label: 'Course Title' },
-        { key: 'finalScore',      label: 'Final Score' },
-        { key: 'sectionCode',     label: 'Section' },
-        { key: 'issuedAt',        label: 'Issued At' },
-        { key: 'status',          label: 'Status' }
-      ];
-      rows = certs.map((c) => ({
-        certificateCode: c.certificateCode,
-        studentNumber:   c.student?.studentNumber || `STU-${c.studentId}`,
-        recipientName:   c.recipientName,
-        email:           c.student?.email || '',
-        courseCode:      c.courseCode,
-        courseTitle:     c.courseTitle,
-        finalScore:      c.finalScore,
-        sectionCode:     c.classSection?.sectionCode || '',
-        issuedAt:        new Date(c.issuedAt).toLocaleDateString(),
-        status:          c.status
-      }));
-
-    // ── Class Summary (all classes, optionally filtered by semester) ────────
-    } else if (type === 'classSummary') {
-      reportTitle = 'Class Section Summary Report';
-      const classWhere = {};
-      let semesterName = '';
-
-      if (semesterId) {
-        // Find all course offerings for this semester, then get their class IDs
-        const offerings = await CourseOffering.findAll({
-          where: { semesterId: Number(semesterId) },
-          attributes: ['id']
-        });
-        const offeringIds = offerings.map((o) => o.id);
-        if (offeringIds.length > 0) {
-          classWhere.courseOfferingId = offeringIds;
-        }
-        const sem = await Semester.findByPk(Number(semesterId), { attributes: ['name'] });
-        if (sem) semesterName = sem.name;
-      }
-
-      const classes = await ClassSection.findAll({
-        where: classWhere,
-        include: [
-          {
-            model: CourseOffering,
-            as: 'courseOffering',
-            include: [
-              { model: Course,   as: 'course',   attributes: ['id', 'code', 'title'] },
-              { model: Semester, as: 'semester', attributes: ['id', 'name'] }
-            ]
-          },
-          { model: InstructorAssignment, as: 'instructorAssignments',
-            include: [{ model: User, as: 'instructor', attributes: ['id', 'firstName', 'lastName'] }]
-          },
-          { model: ClassMembership, as: 'memberships', attributes: ['id', 'status'] }
-        ],
-        order: [['id', 'ASC']],
-        limit: rowLimit,
-        offset: rowOffset
-      });
-
-      if (semesterName) reportTitle = `Class Summary — ${semesterName}`;
-
-      headers = [
-        { key: 'sectionCode',     label: 'Section Code' },
-        { key: 'name',            label: 'Section Name' },
-        { key: 'courseCode',      label: 'Course Code' },
-        { key: 'courseTitle',     label: 'Course Title' },
-        { key: 'semesterName',    label: 'Semester' },
-        { key: 'instructor',      label: 'Instructor' },
-        { key: 'enrolledCount',   label: 'Enrolled' },
-        { key: 'capacity',        label: 'Capacity' },
-        { key: 'finalGradesStatus', label: 'Grades Status' },
-        { key: 'status',          label: 'Section Status' }
-      ];
-      rows = classes.map((cls) => {
-        const primaryInstructor = cls.instructorAssignments?.find((ia) => ia.isPrimary)
-          || cls.instructorAssignments?.[0];
-        const enrolled = (cls.memberships || []).filter((m) => m.status === 'enrolled').length;
-        return {
-          sectionCode:      cls.sectionCode,
-          name:             cls.name,
-          courseCode:       cls.courseOffering?.course?.code      || '',
-          courseTitle:      cls.courseOffering?.course?.title     || '',
-          semesterName:     cls.courseOffering?.semester?.name    || '',
-          instructor:       primaryInstructor?.instructor
-            ? `${primaryInstructor.instructor.firstName} ${primaryInstructor.instructor.lastName}`
-            : 'Unassigned',
-          enrolledCount:    enrolled,
-          capacity:         cls.capacity,
-          finalGradesStatus: cls.finalGradesStatus,
-          status:           cls.status
-        };
-      });
-
-    // ── Default: Enrollments ───────────────────────────────────────────────
     } else {
+      // Default: enrollments / class roster
       reportTitle = 'Student Enrollment & Roster Report';
       const where = {};
-      if (classId)    where.classId = Number(classId);
-
-      // Optional semester filter — join through ClassSection → CourseOffering
-      let semesterClause = {};
-      if (semesterId && !classId) {
-        const offerings = await CourseOffering.findAll({
-          where: { semesterId: Number(semesterId) },
-          attributes: ['id']
-        });
-        const offeringIds = offerings.map((o) => o.id);
-        if (offeringIds.length) {
-          const classSections = await ClassSection.findAll({
-            where: { courseOfferingId: offeringIds },
-            attributes: ['id']
-          });
-          const classIds = classSections.map((c) => c.id);
-          if (classIds.length) where.classId = classIds;
-        }
-      }
-
+      if (classId) where.classId = Number(classId);
       const enrollments = await ClassMembership.findAll({
         where,
         include: [
@@ -813,54 +561,38 @@ async function generateReport(req, res, next) {
           {
             model: ClassSection,
             as: 'classSection',
-            include: [{
-              model: CourseOffering,
-              as: 'courseOffering',
-              include: [
-                { model: Course,   as: 'course',   attributes: ['id', 'code', 'title'] },
-                { model: Semester, as: 'semester', attributes: ['id', 'name'] }
-              ]
-            }]
+            include: [{ model: CourseOffering, as: 'courseOffering', include: [{ model: Course, as: 'course' }] }]
           }
-        ],
-        order: [['id', 'DESC']],
-        limit: rowLimit,
-        offset: rowOffset
+        ]
       });
-
       headers = [
         { key: 'studentNumber', label: 'Student Number' },
-        { key: 'studentName',   label: 'Student Name' },
-        { key: 'email',         label: 'Email' },
-        { key: 'sectionCode',   label: 'Class Section' },
-        { key: 'courseCode',    label: 'Course Code' },
-        { key: 'courseTitle',   label: 'Course Title' },
-        { key: 'semesterName',  label: 'Semester' },
-        { key: 'status',        label: 'Enrollment Status' }
+        { key: 'studentName', label: 'Student Name' },
+        { key: 'email', label: 'Email' },
+        { key: 'sectionCode', label: 'Class Section' },
+        { key: 'courseCode', label: 'Course Code' },
+        { key: 'status', label: 'Enrollment Status' }
       ];
       rows = enrollments.map((e) => ({
         studentNumber: e.student?.studentNumber || `STU-${e.studentId}`,
-        studentName:   e.student ? `${e.student.firstName} ${e.student.lastName}` : '',
-        email:         e.student?.email || '',
-        sectionCode:   e.classSection?.sectionCode || '',
-        courseCode:    e.classSection?.courseOffering?.course?.code  || '',
-        courseTitle:   e.classSection?.courseOffering?.course?.title || '',
-        semesterName:  e.classSection?.courseOffering?.semester?.name || '',
-        status:        e.status
+        studentName: e.student ? `${e.student.firstName} ${e.student.lastName}` : '',
+        email: e.student?.email || '',
+        sectionCode: e.classSection?.sectionCode || '',
+        courseCode: e.classSection?.courseOffering?.course?.code || '',
+        status: e.status
       }));
     }
 
     await recordAudit({
       req,
-      action:   'REPORT_EXPORTED',
+      action: 'REPORT_EXPORTED',
       category: 'academic',
-      metadata: { type, format, classId, semesterId, rowCount: rows.length }
+      metadata: { type, format, rowCount: rows.length }
     });
 
-    // ── CSV / Excel download ───────────────────────────────────────────────
     if (format === 'csv' || format === 'excel') {
-      const csv  = toCsvString(headers, rows);
-      const ext  = format === 'excel' ? 'xls' : 'csv';
+      const csv = toCsvString(headers, rows);
+      const ext = format === 'excel' ? 'xls' : 'csv';
       const mime = format === 'excel' ? 'application/vnd.ms-excel' : 'text/csv';
       res.setHeader('Content-Type', `${mime}; charset=utf-8`);
       res.setHeader('Content-Disposition', `attachment; filename="lms-report-${type}-${Date.now()}.${ext}"`);
@@ -872,8 +604,6 @@ async function generateReport(req, res, next) {
       data: {
         reportTitle,
         generatedAt: new Date().toISOString(),
-        totalRows: rows.length,
-        summary,
         headers,
         rows
       }

@@ -1,4 +1,3 @@
-const { Op, fn, col, literal } = require('sequelize');
 const {
   User,
   Role,
@@ -90,193 +89,66 @@ async function getDashboardSummary(req, res, next) {
     }
 
     if (role === 'academic_admin') {
-      // ── 1. Resolve the active semester (isCurrent=true) ──────────────────
-      const [allSemesters, allAcademicYears] = await Promise.all([
-        Semester.findAll({ order: [['startDate', 'DESC']] }),
-        AcademicYear.findAll({ order: [['startDate', 'DESC']] })
-      ]);
-
-      const activeSemester = allSemesters.find((s) => s.isCurrent) || allSemesters[0] || null;
-      const activeYear     = allAcademicYears.find((y) => y.isCurrent) || allAcademicYears[0] || null;
-
-      // ── 2. Scope class IDs to the active semester (if one exists) ─────────
-      let currentSemesterClassIds = null;
-      let currentSemesterOfferings = [];
-      if (activeSemester) {
-        currentSemesterOfferings = await CourseOffering.findAll({
-          where: { semesterId: activeSemester.id },
-          attributes: ['id']
-        });
-        const offeringIds = currentSemesterOfferings.map((o) => o.id);
-        if (offeringIds.length) {
-          const currentClasses = await ClassSection.findAll({
-            where: { courseOfferingId: offeringIds },
-            attributes: ['id']
-          });
-          currentSemesterClassIds = currentClasses.map((c) => c.id);
-        } else {
-          currentSemesterClassIds = [];
-        }
-      }
-
-      const enrollmentWhere = currentSemesterClassIds !== null
-        ? { classId: currentSemesterClassIds, status: ['enrolled', 'completed'] }
-        : { status: ['enrolled', 'completed'] };
-
-      const classWhere = currentSemesterClassIds !== null
-        ? { id: currentSemesterClassIds }
-        : {};
-
-      // ── 3. Run all queries in parallel ────────────────────────────────────
       const [
         departments,
         programs,
+        academicYears,
+        semesters,
         courses,
-        totalCourses,
         classes,
-        totalEnrollments,
-        enrollmentByProgramRaw,
+        enrollments,
         pendingGradeApprovals,
-        recentAnnouncements,
-        unassignedClassCount
+        recentAnnouncements
       ] = await Promise.all([
-        // Departments with program count + course count
-        Department.findAll({
-          include: [
-            { model: Course,   as: 'courses',  attributes: ['id'] },
-            { model: Program,  as: 'programs', attributes: ['id'] }
-          ]
-        }),
-
-        // Programs with department info
-        Program.findAll({
-          include: [{ model: Department, as: 'department', attributes: ['id', 'name', 'code'] }]
-        }),
-
-        // Full catalog courses (used for the chart labels)
-        Course.findAll({ attributes: ['id', 'code', 'title', 'publicationStatus'] }),
-
-        // Total published courses count
-        Course.count({ where: { publicationStatus: 'published' } }),
-
-        // Current-semester class sections with enrollment counts + instructor info
+        Department.findAll({ include: [{ model: Course, as: 'courses', attributes: ['id'] }] }),
+        Program.findAll({ include: [{ model: Department, as: 'department', attributes: ['name', 'code'] }] }),
+        AcademicYear.findAll({ order: [['id', 'DESC']] }),
+        Semester.findAll({ order: [['id', 'DESC']] }),
+        Course.findAll(),
         ClassSection.findAll({
-          where: classWhere,
-          include: [
-            {
-              model: CourseOffering,
-              as: 'courseOffering',
-              include: [
-                { model: Course,   as: 'course',   attributes: ['id', 'code', 'title'] },
-                { model: Semester, as: 'semester',  attributes: ['id', 'name', 'code'] }
-              ]
-            },
-            { model: ClassMembership, as: 'memberships', attributes: ['id', 'status'] },
-            {
-              model: InstructorAssignment,
-              as: 'instructorAssignments',
-              attributes: ['id', 'instructorId', 'isPrimary'],
-              include: [{ model: User, as: 'instructor', attributes: ['id', 'firstName', 'lastName', 'email'] }]
-            }
-          ]
-        }),
-
-        // Enrollment count scoped to current semester
-        ClassMembership.count({ where: enrollmentWhere }),
-
-        // Enrollment by program via DB aggregation instead of JS filter
-        ClassMembership.findAll({
-          where: enrollmentWhere,
-          attributes: [
-            [fn('COUNT', col('ClassMembership.id')), 'enrollmentCount']
-          ],
-          include: [{
-            model: User,
-            as: 'student',
-            attributes: ['programId'],
-            required: true
-          }],
-          group: ['student.program_id'],
-          raw: true
-        }),
-
-        // Classes with grades submitted for approval (all semesters — admin workflow)
-        ClassSection.findAll({
-          where: { finalGradesStatus: 'submitted_for_approval' },
           include: [
             {
               model: CourseOffering,
               as: 'courseOffering',
               include: [
                 { model: Course, as: 'course', attributes: ['id', 'code', 'title'] },
-                { model: Semester, as: 'semester', attributes: ['id', 'name'] }
+                { model: Semester, as: 'semester', attributes: ['id', 'name', 'code'] }
               ]
+            },
+            { model: ClassMembership, as: 'memberships', attributes: ['id', 'status'] }
+          ]
+        }),
+        ClassMembership.findAll({
+          include: [{ model: User, as: 'student', attributes: ['id', 'programId', 'departmentId'] }]
+        }),
+        ClassSection.findAll({
+          where: { finalGradesStatus: 'submitted_for_approval' },
+          include: [
+            {
+              model: CourseOffering,
+              as: 'courseOffering',
+              include: [{ model: Course, as: 'course' }]
             }
           ]
         }),
-
-        // Recent institution/dept/course scoped announcements
-        Announcement.findAll({
-          where: { scope: ['institution', 'department', 'course'] },
-          include: [{ model: User, as: 'author', attributes: ['id', 'firstName', 'lastName'] }],
-          order: [['createdAt', 'DESC']],
-          limit: 6
-        }),
-
-        // Classes in current semester that have no instructor assigned
-        classWhere.id
-          ? ClassSection.count({
-              where: classWhere,
-              include: [{
-                model: InstructorAssignment,
-                as: 'instructorAssignments',
-                required: false,
-                attributes: ['id']
-              }],
-              having: literal('COUNT(instructorAssignments.id) = 0'),
-              group: ['ClassSection.id']
-            }).then((rows) => (Array.isArray(rows) ? rows.length : rows))
-          : Promise.resolve(0)
+        Announcement.findAll({ order: [['createdAt', 'DESC']], limit: 6 })
       ]);
 
-      // ── 4. Build enrollmentByProgram from DB aggregation results ──────────
-      const programMap = new Map(programs.map((p) => [p.id, p]));
       const enrollmentByProgram = programs.map((prog) => {
-        const row = enrollmentByProgramRaw.find((r) => Number(r['student.programId'] ?? r['student.program_id']) === prog.id);
+        const count = enrollments.filter((e) => e.student?.programId === prog.id).length;
         return {
           programCode: prog.code,
           programName: prog.name,
-          departmentCode: prog.department?.code,
-          enrollments: row ? Number(row.enrollmentCount) : 0
+          enrollments: count
         };
-      }).filter((p) => p.enrollments > 0 || programs.length <= 10); // show all if few programs
+      });
 
-      // ── 5. Department summary with program + course counts ─────────────────
       const departmentSummary = departments.map((dept) => ({
-        id:           dept.id,
-        code:         dept.code,
-        name:         dept.name,
-        headName:     dept.headName,
-        status:       dept.status,
-        courseCount:  (dept.courses  || []).length,
-        programCount: (dept.programs || []).length
-      }));
-
-      // ── 6. Classes-at-a-glance (current semester) ─────────────────────────
-      const classesAtAGlance = classes.map((cls) => ({
-        id:               cls.id,
-        sectionCode:      cls.sectionCode,
-        name:             cls.name,
-        courseCode:       cls.courseOffering?.course?.code,
-        courseTitle:      cls.courseOffering?.course?.title,
-        semesterName:     cls.courseOffering?.semester?.name,
-        enrolledCount:    (cls.memberships || []).filter((m) => m.status === 'enrolled').length,
-        capacity:         cls.capacity,
-        finalGradesStatus: cls.finalGradesStatus,
-        hasInstructor:    (cls.instructorAssignments || []).length > 0,
-        instructorName:   cls.instructorAssignments?.[0]?.instructor
-          ? `${cls.instructorAssignments[0].instructor.firstName} ${cls.instructorAssignments[0].instructor.lastName}`
-          : null
+        id: dept.id,
+        code: dept.code,
+        name: dept.name,
+        headName: dept.headName,
+        courseCount: (dept.courses || []).length
       }));
 
       return res.status(200).json({
@@ -284,25 +156,21 @@ async function getDashboardSummary(req, res, next) {
         data: {
           role: 'academic_admin',
           metrics: {
-            totalDepartments:          departments.length,
-            totalPrograms:             programs.length,
-            totalCourses:              totalCourses,
-            totalClasses:              classes.length,
-            totalEnrollments,
+            totalDepartments: departments.length,
+            totalPrograms: programs.length,
+            totalCourses: courses.length,
+            totalClasses: classes.length,
+            totalEnrollments: enrollments.length,
             pendingGradeApprovalsCount: pendingGradeApprovals.length,
-            unassignedClassesCount:    unassignedClassCount,
-            activeSemester:            activeSemester?.name    || null,
-            activeAcademicYear:        activeYear?.name        || null,
-            activeSemesterId:          activeSemester?.id      || null,
-            activeAcademicYearId:      activeYear?.id          || null
+            activeSemester: semesters.find((s) => s.isCurrent)?.name || 'First Semester, 2026–2027'
           },
           enrollmentByProgram,
           departmentSummary,
           pendingGradeApprovals,
-          classesAtAGlance,
+          classes,
           recentAnnouncements,
-          academicYears: allAcademicYears,
-          semesters:     allSemesters
+          academicYears,
+          semesters
         }
       });
     }

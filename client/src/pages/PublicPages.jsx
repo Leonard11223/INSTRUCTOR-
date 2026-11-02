@@ -462,69 +462,50 @@ export function ProfileSettingsPage() {
   const { user, refreshAuth } = useAuth();
   const { addToast } = useToast();
 
-  // ── Profile form state ────────────────────────────────────────────────────
   const [firstName, setFirstName] = useState(user?.firstName || '');
-  const [lastName,  setLastName]  = useState(user?.lastName  || '');
-  const [bio,       setBio]       = useState(user?.bio       || '');
-  const [phone,     setPhone]     = useState(user?.phone     || '');
-  const [timezone,  setTimezone]  = useState(user?.timezone  || 'Asia/Manila');
+  const [lastName, setLastName] = useState(user?.lastName || '');
+  const [bio, setBio] = useState(user?.bio || '');
+  const [phone, setPhone] = useState(user?.phone || '');
   const [prefs, setPrefs] = useState(user?.notificationPreferences || {
-    inApp: true, email: false, assignments: true,
-    assessments: true, grades: true, announcements: true, messages: true
+    inApp: true,
+    email: false,
+    assignments: true,
+    assessments: true,
+    grades: true,
+    announcements: true
   });
-  const [savingProfile, setSavingProfile] = useState(false);
 
-  // ── Password form state ───────────────────────────────────────────────────
-  const [currentPassword, setCurrentPassword]   = useState('');
-  const [newPassword,     setNewPassword]       = useState('');
-  const [confirmPassword, setConfirmPassword]   = useState('');
-  const [savingPassword,  setSavingPassword]    = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
 
   const handleSaveProfile = async (e) => {
     e.preventDefault();
-    setSavingProfile(true);
     try {
-      await lmsApi.updateProfile({ firstName, lastName, bio, phone, timezone, notificationPreferences: prefs });
+      await lmsApi.updateProfile({
+        firstName,
+        lastName,
+        bio,
+        phone,
+        notificationPreferences: prefs
+      });
       await refreshAuth();
-      addToast('Profile and preferences saved.');
+      addToast('Profile and notification preferences saved.');
     } catch (err) {
       addToast(extractErrorMessage(err), 'error');
-    } finally {
-      setSavingProfile(false);
     }
   };
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
-    if (newPassword !== confirmPassword) {
-      addToast('New passwords do not match.', 'error');
-      return;
-    }
-    if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      addToast('New password must be at least 8 characters, include an uppercase letter and a number.', 'error');
-      return;
-    }
-    setSavingPassword(true);
     try {
       await lmsApi.changePassword({ currentPassword, newPassword });
       setCurrentPassword('');
       setNewPassword('');
-      setConfirmPassword('');
       addToast('Password changed successfully.');
     } catch (err) {
       addToast(extractErrorMessage(err), 'error');
-    } finally {
-      setSavingPassword(false);
     }
   };
-
-  // ── Common timezones ──────────────────────────────────────────────────────
-  const COMMON_TIMEZONES = [
-    'Asia/Manila', 'Asia/Singapore', 'Asia/Kuala_Lumpur', 'Asia/Jakarta',
-    'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Seoul', 'Asia/Kolkata',
-    'UTC', 'America/New_York', 'America/Chicago', 'America/Los_Angeles',
-    'Europe/London', 'Europe/Paris', 'Australia/Sydney'
-  ];
 
   return (
     <div className="space-y-6">
@@ -534,137 +515,104 @@ export function ProfileSettingsPage() {
         subtitle="Manage your personal academic profile, security credentials, and alert channels."
       />
 
-      {/* ── Account info card (read-only) ──────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6">
-        <h2 className="text-base font-bold text-slate-900 mb-4">Account Information</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-          <div>
-            <p className="font-semibold text-slate-500 uppercase tracking-wider mb-1">Email Address</p>
-            <p className="font-semibold text-slate-800">{user?.email}</p>
-          </div>
-          <div>
-            <p className="font-semibold text-slate-500 uppercase tracking-wider mb-1">Role</p>
-            <StatusBadge status={user?.primaryRole?.replace('_', ' ')} />
-          </div>
-          <div>
-            <p className="font-semibold text-slate-500 uppercase tracking-wider mb-1">ID Number</p>
-            <p className="font-semibold text-slate-800">
-              {user?.employeeNumber || user?.studentNumber || <span className="text-slate-400 italic">Not assigned</span>}
-            </p>
-          </div>
-          <div>
-            <p className="font-semibold text-slate-500 uppercase tracking-wider mb-1">Account Status</p>
-            <StatusBadge status={user?.status || 'active'} />
-          </div>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* ── Personal information form ──────────────────────────────────── */}
         <form onSubmit={handleSaveProfile} className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
           <h2 className="text-base font-bold text-slate-900">Personal Information</h2>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">First Name</label>
-              <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <input
+                type="text"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+              />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Last Name</label>
-              <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <input
+                type="text"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+              />
             </div>
           </div>
-
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Academic Bio</label>
-            <textarea rows={3} value={bio} onChange={(e) => setBio(e.target.value)}
-              placeholder="Describe your academic role and focus area..."
-              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <textarea
+              rows={3}
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Contact Phone</label>
+            <input
+              type="text"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Contact Phone</label>
-              <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)}
-                placeholder="+63 9XX XXX XXXX"
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Timezone</label>
-              <select value={timezone} onChange={(e) => setTimezone(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                {COMMON_TIMEZONES.map((tz) => (
-                  <option key={tz} value={tz}>{tz.replace('_', ' ')}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Notification preferences */}
-          <div className="pt-3 border-t border-slate-100">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
+          <div className="pt-2 border-t border-slate-100">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
               Notification Channels
             </h3>
             <div className="grid grid-cols-2 gap-2 text-xs">
               {Object.keys(prefs).map((key) => (
-                <label key={key} className="flex items-center gap-2 text-slate-700 cursor-pointer select-none">
-                  <input type="checkbox" checked={Boolean(prefs[key])}
+                <label key={key} className="flex items-center gap-2 text-slate-700 capitalize">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(prefs[key])}
                     onChange={(e) => setPrefs({ ...prefs, [key]: e.target.checked })}
-                    className="rounded border-slate-300 text-blue-600" />
-                  <span className="capitalize">{key.replace(/([A-Z])/g, ' $1').toLowerCase()}</span>
+                    className="rounded border-slate-300 text-blue-600"
+                  />
+                  <span>{key.replace(/([A-Z])/g, ' $1')}</span>
                 </label>
               ))}
             </div>
           </div>
 
-          <button type="submit" disabled={savingProfile}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition-colors">
-            {savingProfile ? 'Saving…' : 'Save Profile Changes'}
+          <button
+            type="submit"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg"
+          >
+            Save Profile Changes
           </button>
         </form>
 
-        {/* ── Change password form ───────────────────────────────────────── */}
         <form onSubmit={handleChangePassword} className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
           <h2 className="text-base font-bold text-slate-900">Change Account Password</h2>
-          <p className="text-xs text-slate-500">
-            Min 8 characters — must include at least one uppercase letter and one number.
-          </p>
-
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Current Password</label>
-            <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)}
-              required autoComplete="current-password"
-              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+            />
           </div>
-
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">New Password</label>
-            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
-              required autoComplete="new-password"
-              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              New Password (min 8 chars, uppercase & number)
+            </label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+            />
           </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Confirm New Password</label>
-            <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
-              required autoComplete="new-password"
-              className={`w-full px-3 py-2 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                confirmPassword && confirmPassword !== newPassword
-                  ? 'border-red-400 bg-red-50'
-                  : 'border-slate-300'
-              }`} />
-            {confirmPassword && confirmPassword !== newPassword && (
-              <p className="text-xs text-red-500 mt-1">Passwords do not match.</p>
-            )}
-          </div>
-
-          <button type="submit"
-            disabled={savingPassword || (confirmPassword.length > 0 && confirmPassword !== newPassword)}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition-colors">
-            {savingPassword ? 'Updating…' : 'Update Password'}
+          <button
+            type="submit"
+            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg"
+          >
+            Update Password
           </button>
         </form>
       </div>

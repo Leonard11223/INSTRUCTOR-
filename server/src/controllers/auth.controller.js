@@ -278,16 +278,6 @@ async function updateProfile(req, res, next) {
         : user.notificationPreferences
     });
 
-    await recordAudit({
-      req,
-      action:   'PROFILE_UPDATED',
-      category: 'user',
-      severity: 'info',
-      entityType: 'User',
-      entityId: user.id,
-      metadata: { updatedFields: Object.keys(payload) }
-    });
-
     const updatedAuth = await loadUserAuthContext(user.id);
     return res.status(200).json({
       success: true,

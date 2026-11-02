@@ -28,18 +28,11 @@ const { recalculateStudentCourseProgress } = require('../services/progress.servi
 const {
   departmentSchema,
   programSchema,
-  updateDepartmentSchema,
-  updateProgramSchema,
-  updateAcademicYearSchema,
-  updateSemesterSchema,
   academicYearSchema,
   semesterSchema,
   courseSchema,
   courseOfferingSchema,
-  updateCourseSchema,
-  updateCourseOfferingSchema,
-  classSectionSchema,
-  updateClassSectionSchema
+  classSectionSchema
 } = require('../validators/schemas');
 
 // Institutions
@@ -110,24 +103,9 @@ async function createDepartment(req, res, next) {
 
 async function updateDepartment(req, res, next) {
   try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid department ID.', 400);
-
-    const department = await Department.findByPk(id);
-    if (!department) throw new AppError('Department not found.', 404, 'DEPARTMENT_NOT_FOUND');
-
-    const payload = updateDepartmentSchema.parse(req.body);
-    await department.update(payload);
-
-    await recordAudit({
-      req,
-      action:     'DEPARTMENT_UPDATED',
-      category:   'academic',
-      entityType: 'Department',
-      entityId:   department.id,
-      metadata:   { updatedFields: Object.keys(payload) }
-    });
-
+    const department = await Department.findByPk(req.params.id);
+    if (!department) throw new AppError('Department not found.', 404);
+    await department.update(req.body);
     return res.status(200).json({ success: true, message: 'Department updated.', data: { department } });
   } catch (err) {
     return next(err);
@@ -223,67 +201,10 @@ async function createProgram(req, res, next) {
 
 async function updateProgram(req, res, next) {
   try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid program ID.', 400);
-
-    const program = await Program.findByPk(id);
-    if (!program) throw new AppError('Program not found.', 404, 'PROGRAM_NOT_FOUND');
-
-    const payload = updateProgramSchema.parse(req.body);
-
-    // If changing department, verify it exists
-    if (payload.departmentId) {
-      const dept = await Department.findByPk(payload.departmentId);
-      if (!dept) throw new AppError('Department not found.', 404, 'DEPARTMENT_NOT_FOUND');
-    }
-
-    await program.update(payload);
-
-    await recordAudit({
-      req,
-      action:     'PROGRAM_UPDATED',
-      category:   'academic',
-      entityType: 'Program',
-      entityId:   program.id,
-      metadata:   { updatedFields: Object.keys(payload) }
-    });
-
+    const program = await Program.findByPk(req.params.id);
+    if (!program) throw new AppError('Program not found.', 404);
+    await program.update(req.body);
     return res.status(200).json({ success: true, message: 'Program updated.', data: { program } });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-async function deleteProgram(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid program ID.', 400);
-
-    const program = await Program.findByPk(id);
-    if (!program) throw new AppError('Program not found.', 404, 'PROGRAM_NOT_FOUND');
-
-    // Guard: cannot delete if courses are linked to this program
-    const coursesCount = await Course.count({ where: { programId: id } });
-    if (coursesCount > 0) {
-      throw new AppError(
-        `Cannot delete program "${program.code}" because it has ${coursesCount} course(s) linked to it. Archive it or reassign its courses first.`,
-        409,
-        'REFERENCED_RECORD_PROTECTED'
-      );
-    }
-
-    await recordAudit({
-      req,
-      action:     'PROGRAM_DELETED',
-      category:   'academic',
-      entityType: 'Program',
-      entityId:   program.id,
-      metadata:   { code: program.code, name: program.name }
-    });
-
-    await program.destroy();
-
-    return res.status(200).json({ success: true, message: 'Program deleted successfully.' });
   } catch (err) {
     return next(err);
   }
@@ -292,12 +213,7 @@ async function deleteProgram(req, res, next) {
 // Academic Years & Semesters
 async function listAcademicYears(req, res, next) {
   try {
-    const { status } = req.query;
-    const where = {};
-    if (status) where.status = status;
-
     const academicYears = await AcademicYear.findAll({
-      where,
       include: [{ model: Semester, as: 'semesters' }],
       order: [['startDate', 'DESC']]
     });
@@ -307,127 +223,18 @@ async function listAcademicYears(req, res, next) {
   }
 }
 
-async function getAcademicYearById(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid academic year ID.', 400);
-
-    const academicYear = await AcademicYear.findByPk(id, {
-      include: [{ model: Semester, as: 'semesters' }]
-    });
-    if (!academicYear) throw new AppError('Academic year not found.', 404, 'ACADEMIC_YEAR_NOT_FOUND');
-
-    return res.status(200).json({ success: true, data: { academicYear } });
-  } catch (err) {
-    return next(err);
-  }
-}
-
 async function createAcademicYear(req, res, next) {
-  const t = await sequelize.transaction();
   try {
     const payload = academicYearSchema.parse(req.body);
-    const inst = await Institution.findOne({ transaction: t });
-
-    // If marking as current, clear all others first — inside the same transaction
+    const inst = await Institution.findOne();
     if (payload.isCurrent) {
-      await AcademicYear.update({ isCurrent: false }, { where: {}, transaction: t });
+      await AcademicYear.update({ isCurrent: false }, { where: {} });
     }
-
     const academicYear = await AcademicYear.create({
       institutionId: inst?.id || 1,
       ...payload
-    }, { transaction: t });
-
-    await t.commit();
-
-    await recordAudit({
-      req,
-      action:     'ACADEMIC_YEAR_CREATED',
-      category:   'academic',
-      entityType: 'AcademicYear',
-      entityId:   academicYear.id,
-      metadata:   { name: academicYear.name, status: academicYear.status, isCurrent: academicYear.isCurrent }
     });
-
     return res.status(201).json({ success: true, message: 'Academic year created.', data: { academicYear } });
-  } catch (err) {
-    await t.rollback();
-    return next(err);
-  }
-}
-
-async function updateAcademicYear(req, res, next) {
-  const t = await sequelize.transaction();
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid academic year ID.', 400);
-
-    const academicYear = await AcademicYear.findByPk(id, { transaction: t });
-    if (!academicYear) throw new AppError('Academic year not found.', 404, 'ACADEMIC_YEAR_NOT_FOUND');
-
-    const payload = updateAcademicYearSchema.parse(req.body);
-
-    // If setting this as current, clear all others first
-    if (payload.isCurrent === true) {
-      await AcademicYear.update({ isCurrent: false }, { where: {}, transaction: t });
-    }
-
-    await academicYear.update(payload, { transaction: t });
-    await t.commit();
-
-    await recordAudit({
-      req,
-      action:     'ACADEMIC_YEAR_UPDATED',
-      category:   'academic',
-      entityType: 'AcademicYear',
-      entityId:   academicYear.id,
-      metadata:   { updatedFields: Object.keys(payload) }
-    });
-
-    // Re-fetch with semesters for the response
-    const updated = await AcademicYear.findByPk(id, {
-      include: [{ model: Semester, as: 'semesters' }]
-    });
-
-    return res.status(200).json({ success: true, message: 'Academic year updated.', data: { academicYear: updated } });
-  } catch (err) {
-    await t.rollback();
-    return next(err);
-  }
-}
-
-async function deleteAcademicYear(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid academic year ID.', 400);
-
-    const academicYear = await AcademicYear.findByPk(id, {
-      include: [{ model: Semester, as: 'semesters' }]
-    });
-    if (!academicYear) throw new AppError('Academic year not found.', 404, 'ACADEMIC_YEAR_NOT_FOUND');
-
-    // Guard: cannot delete if it has semesters
-    if (academicYear.semesters && academicYear.semesters.length > 0) {
-      throw new AppError(
-        `Cannot delete academic year "${academicYear.name}" because it has ${academicYear.semesters.length} semester(s) linked to it. Archive it or remove its semesters first.`,
-        409,
-        'REFERENCED_RECORD_PROTECTED'
-      );
-    }
-
-    await recordAudit({
-      req,
-      action:     'ACADEMIC_YEAR_DELETED',
-      category:   'academic',
-      entityType: 'AcademicYear',
-      entityId:   academicYear.id,
-      metadata:   { name: academicYear.name }
-    });
-
-    await academicYear.destroy();
-
-    return res.status(200).json({ success: true, message: 'Academic year deleted.' });
   } catch (err) {
     return next(err);
   }
@@ -435,14 +242,7 @@ async function deleteAcademicYear(req, res, next) {
 
 async function listSemesters(req, res, next) {
   try {
-    const { academicYearId, status, isCurrent } = req.query;
-    const where = {};
-    if (academicYearId) where.academicYearId = Number(academicYearId);
-    if (status)         where.status         = status;
-    if (isCurrent !== undefined) where.isCurrent = isCurrent === 'true';
-
     const semesters = await Semester.findAll({
-      where,
       include: [{ model: AcademicYear, as: 'academicYear' }],
       order: [['startDate', 'DESC']]
     });
@@ -452,134 +252,14 @@ async function listSemesters(req, res, next) {
   }
 }
 
-async function getSemesterById(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid semester ID.', 400);
-
-    const semester = await Semester.findByPk(id, {
-      include: [{ model: AcademicYear, as: 'academicYear' }]
-    });
-    if (!semester) throw new AppError('Semester not found.', 404, 'SEMESTER_NOT_FOUND');
-
-    return res.status(200).json({ success: true, data: { semester } });
-  } catch (err) {
-    return next(err);
-  }
-}
-
 async function createSemester(req, res, next) {
-  const t = await sequelize.transaction();
   try {
     const payload = semesterSchema.parse(req.body);
-
-    // Verify parent academic year exists
-    const academicYear = await AcademicYear.findByPk(payload.academicYearId, { transaction: t });
-    if (!academicYear) throw new AppError('Academic year not found.', 404, 'ACADEMIC_YEAR_NOT_FOUND');
-
-    // If marking as current, clear all others first
     if (payload.isCurrent) {
-      await Semester.update({ isCurrent: false }, { where: {}, transaction: t });
+      await Semester.update({ isCurrent: false }, { where: {} });
     }
-
-    const semester = await Semester.create(payload, { transaction: t });
-    await t.commit();
-
-    await recordAudit({
-      req,
-      action:     'SEMESTER_CREATED',
-      category:   'academic',
-      entityType: 'Semester',
-      entityId:   semester.id,
-      metadata:   { name: semester.name, code: semester.code, academicYearId: semester.academicYearId }
-    });
-
-    const full = await Semester.findByPk(semester.id, {
-      include: [{ model: AcademicYear, as: 'academicYear' }]
-    });
-
-    return res.status(201).json({ success: true, message: 'Semester created.', data: { semester: full } });
-  } catch (err) {
-    await t.rollback();
-    return next(err);
-  }
-}
-
-async function updateSemester(req, res, next) {
-  const t = await sequelize.transaction();
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid semester ID.', 400);
-
-    const semester = await Semester.findByPk(id, { transaction: t });
-    if (!semester) throw new AppError('Semester not found.', 404, 'SEMESTER_NOT_FOUND');
-
-    const payload = updateSemesterSchema.parse(req.body);
-
-    // If changing parent, verify new academic year exists
-    if (payload.academicYearId) {
-      const ay = await AcademicYear.findByPk(payload.academicYearId, { transaction: t });
-      if (!ay) throw new AppError('Academic year not found.', 404, 'ACADEMIC_YEAR_NOT_FOUND');
-    }
-
-    // If setting as current, clear all others first
-    if (payload.isCurrent === true) {
-      await Semester.update({ isCurrent: false }, { where: {}, transaction: t });
-    }
-
-    await semester.update(payload, { transaction: t });
-    await t.commit();
-
-    await recordAudit({
-      req,
-      action:     'SEMESTER_UPDATED',
-      category:   'academic',
-      entityType: 'Semester',
-      entityId:   semester.id,
-      metadata:   { updatedFields: Object.keys(payload) }
-    });
-
-    const updated = await Semester.findByPk(id, {
-      include: [{ model: AcademicYear, as: 'academicYear' }]
-    });
-
-    return res.status(200).json({ success: true, message: 'Semester updated.', data: { semester: updated } });
-  } catch (err) {
-    await t.rollback();
-    return next(err);
-  }
-}
-
-async function deleteSemester(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid semester ID.', 400);
-
-    const semester = await Semester.findByPk(id);
-    if (!semester) throw new AppError('Semester not found.', 404, 'SEMESTER_NOT_FOUND');
-
-    // Guard: cannot delete if course offerings are linked to this semester
-    const offeringsCount = await CourseOffering.count({ where: { semesterId: id } });
-    if (offeringsCount > 0) {
-      throw new AppError(
-        `Cannot delete semester "${semester.name}" because it has ${offeringsCount} course offering(s) linked to it. Archive it or remove its offerings first.`,
-        409,
-        'REFERENCED_RECORD_PROTECTED'
-      );
-    }
-
-    await recordAudit({
-      req,
-      action:     'SEMESTER_DELETED',
-      category:   'academic',
-      entityType: 'Semester',
-      entityId:   semester.id,
-      metadata:   { name: semester.name, code: semester.code }
-    });
-
-    await semester.destroy();
-
-    return res.status(200).json({ success: true, message: 'Semester deleted.' });
+    const semester = await Semester.create(payload);
+    return res.status(201).json({ success: true, message: 'Semester created.', data: { semester } });
   } catch (err) {
     return next(err);
   }
@@ -704,58 +384,17 @@ async function createCourse(req, res, next) {
 
 async function updateCourse(req, res, next) {
   try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid course ID.', 400);
-
-    const course = await Course.findByPk(id);
-    if (!course) throw new AppError('Course not found.', 404, 'COURSE_NOT_FOUND');
-
-    const payload = updateCourseSchema.parse(req.body);
-    await course.update(payload);
-
+    const course = await Course.findByPk(req.params.id);
+    if (!course) throw new AppError('Course not found.', 404);
+    await course.update(req.body);
     await recordAudit({
       req,
-      action:     'COURSE_UPDATED',
-      category:   'course',
+      action: 'COURSE_UPDATED',
+      category: 'course',
       entityType: 'Course',
-      entityId:   course.id,
-      metadata:   { updatedFields: Object.keys(payload) }
+      entityId: course.id
     });
     return res.status(200).json({ success: true, message: 'Course updated.', data: { course } });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-async function deleteCourse(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid course ID.', 400);
-
-    const course = await Course.findByPk(id);
-    if (!course) throw new AppError('Course not found.', 404, 'COURSE_NOT_FOUND');
-
-    // Guard: cannot delete if course has offerings
-    const offeringsCount = await CourseOffering.count({ where: { courseId: id } });
-    if (offeringsCount > 0) {
-      throw new AppError(
-        `Cannot delete course "${course.code}" because it has ${offeringsCount} course offering(s) linked to it. Archive it or remove its offerings first.`,
-        409,
-        'REFERENCED_RECORD_PROTECTED'
-      );
-    }
-
-    await recordAudit({
-      req,
-      action:     'COURSE_DELETED',
-      category:   'course',
-      entityType: 'Course',
-      entityId:   course.id,
-      metadata:   { code: course.code, title: course.title }
-    });
-
-    await course.destroy();
-    return res.status(200).json({ success: true, message: 'Course deleted successfully.' });
   } catch (err) {
     return next(err);
   }
@@ -810,58 +449,10 @@ async function createCourseOffering(req, res, next) {
 
 async function updateCourseOffering(req, res, next) {
   try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid offering ID.', 400);
-
-    const offering = await CourseOffering.findByPk(id);
-    if (!offering) throw new AppError('Course offering not found.', 404, 'OFFERING_NOT_FOUND');
-
-    const payload = updateCourseOfferingSchema.parse(req.body);
-    await offering.update(payload);
-
-    await recordAudit({
-      req,
-      action:     'COURSE_OFFERING_UPDATED',
-      category:   'academic',
-      entityType: 'CourseOffering',
-      entityId:   offering.id,
-      metadata:   { updatedFields: Object.keys(payload) }
-    });
+    const offering = await CourseOffering.findByPk(req.params.id);
+    if (!offering) throw new AppError('Course offering not found.', 404);
+    await offering.update(req.body);
     return res.status(200).json({ success: true, message: 'Course offering updated.', data: { offering } });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-async function deleteCourseOffering(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid offering ID.', 400);
-
-    const offering = await CourseOffering.findByPk(id);
-    if (!offering) throw new AppError('Course offering not found.', 404, 'OFFERING_NOT_FOUND');
-
-    // Guard: cannot delete if class sections are linked to this offering
-    const classCount = await ClassSection.count({ where: { courseOfferingId: id } });
-    if (classCount > 0) {
-      throw new AppError(
-        `Cannot delete offering "${offering.offeringCode}" because it has ${classCount} class section(s) linked to it. Archive it or remove its sections first.`,
-        409,
-        'REFERENCED_RECORD_PROTECTED'
-      );
-    }
-
-    await recordAudit({
-      req,
-      action:     'COURSE_OFFERING_DELETED',
-      category:   'academic',
-      entityType: 'CourseOffering',
-      entityId:   offering.id,
-      metadata:   { offeringCode: offering.offeringCode }
-    });
-
-    await offering.destroy();
-    return res.status(200).json({ success: true, message: 'Course offering deleted successfully.' });
   } catch (err) {
     return next(err);
   }
@@ -1105,97 +696,6 @@ async function assignTaToClass(req, res, next) {
   }
 }
 
-async function updateClassSection(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid class section ID.', 400);
-
-    const classSection = await ClassSection.findByPk(id);
-    if (!classSection) throw new AppError('Class section not found.', 404, 'CLASS_NOT_FOUND');
-
-    const payload = updateClassSectionSchema.parse(req.body);
-    await classSection.update(payload);
-
-    await recordAudit({
-      req,
-      action:     'CLASS_SECTION_UPDATED',
-      category:   'academic',
-      entityType: 'ClassSection',
-      entityId:   classSection.id,
-      metadata:   { updatedFields: Object.keys(payload) }
-    });
-
-    // Re-fetch with full associations for the response
-    const updated = await ClassSection.findByPk(id, {
-      include: [
-        {
-          model: CourseOffering,
-          as: 'courseOffering',
-          include: [
-            { model: Course,   as: 'course',   attributes: ['id', 'code', 'title'] },
-            { model: Semester, as: 'semester',  attributes: ['id', 'name', 'code'] }
-          ]
-        },
-        {
-          model: InstructorAssignment,
-          as: 'instructorAssignments',
-          include: [{ model: User, as: 'instructor', attributes: ['id', 'firstName', 'lastName', 'email'] }]
-        },
-        {
-          model: TeachingAssistantAssignment,
-          as: 'taAssignments',
-          include: [{ model: User, as: 'teachingAssistant', attributes: ['id', 'firstName', 'lastName', 'email'] }]
-        },
-        { model: ClassMembership, as: 'memberships', attributes: ['id', 'status'] }
-      ]
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Class section updated.',
-      data: { classSection: updated }
-    });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-async function deleteClassSection(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid class section ID.', 400);
-
-    const classSection = await ClassSection.findByPk(id);
-    if (!classSection) throw new AppError('Class section not found.', 404, 'CLASS_NOT_FOUND');
-
-    // Guard: cannot delete if students are actively enrolled
-    const enrolledCount = await ClassMembership.count({
-      where: { classId: id, status: ['enrolled', 'pending'] }
-    });
-    if (enrolledCount > 0) {
-      throw new AppError(
-        `Cannot delete class section "${classSection.sectionCode}" because it has ${enrolledCount} enrolled student(s). Drop or transfer them first, or archive the section instead.`,
-        409,
-        'REFERENCED_RECORD_PROTECTED'
-      );
-    }
-
-    await recordAudit({
-      req,
-      action:     'CLASS_SECTION_DELETED',
-      category:   'academic',
-      entityType: 'ClassSection',
-      entityId:   classSection.id,
-      metadata:   { sectionCode: classSection.sectionCode, name: classSection.name }
-    });
-
-    await classSection.destroy();
-    return res.status(200).json({ success: true, message: 'Class section deleted.' });
-  } catch (err) {
-    return next(err);
-  }
-}
-
 // Enrollments & CSV Import
 async function listEnrollments(req, res, next) {
   try {
@@ -1265,21 +765,6 @@ async function enrollStudent(req, res, next) {
 
     if (existing && existing.status === 'enrolled') {
       throw new AppError('Student is already enrolled in this class section.', 409, 'DUPLICATE_ENROLLMENT');
-    }
-
-    // Capacity check — count active enrollments and compare against section capacity
-    if (!existing || existing.status !== 'enrolled') {
-      const activeCount = await ClassMembership.count({
-        where: { classId, status: ['enrolled', 'pending'] },
-        transaction: t
-      });
-      if (activeCount >= classSection.capacity) {
-        throw new AppError(
-          `Class section "${classSection.sectionCode}" is at full capacity (${classSection.capacity} students).`,
-          409,
-          'CLASS_AT_CAPACITY'
-        );
-      }
     }
 
     const status = (req.user.primaryRole === 'student' && classSection.courseOffering?.enrollmentPolicy === 'instructor_approval')
@@ -1451,124 +936,6 @@ async function importRecordsCsv(req, res, next) {
   }
 }
 
-async function dropStudent(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid enrollment ID.', 400);
-
-    const membership = await ClassMembership.findByPk(id, {
-      include: [
-        { model: ClassSection, as: 'classSection', attributes: ['id', 'sectionCode', 'name'] },
-        { model: User, as: 'student', attributes: ['id', 'firstName', 'lastName', 'email'] }
-      ]
-    });
-    if (!membership) throw new AppError('Enrollment record not found.', 404, 'ENROLLMENT_NOT_FOUND');
-
-    if (['dropped', 'transferred', 'completed'].includes(membership.status)) {
-      throw new AppError(
-        `Cannot drop this enrollment — current status is "${membership.status}".`,
-        409,
-        'INVALID_STATUS_TRANSITION'
-      );
-    }
-
-    const remarks = req.body.remarks || `Dropped by ${req.user.fullName || req.user.email}`;
-    await membership.update({ status: 'dropped', remarks });
-
-    await recordAudit({
-      req,
-      action:     'STUDENT_DROPPED',
-      category:   'academic',
-      entityType: 'ClassMembership',
-      entityId:   membership.id,
-      metadata: {
-        classId:     membership.classId,
-        studentId:   membership.studentId,
-        sectionCode: membership.classSection?.sectionCode,
-        studentName: membership.student ? `${membership.student.firstName} ${membership.student.lastName}` : null
-      }
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Student dropped from class section.',
-      data: { membership }
-    });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-async function updateEnrollmentStatus(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid enrollment ID.', 400);
-
-    const { status, remarks } = req.body;
-
-    const ALLOWED_STATUSES = ['pending', 'enrolled', 'dropped', 'completed'];
-    if (!status || !ALLOWED_STATUSES.includes(status)) {
-      throw new AppError(`Status must be one of: ${ALLOWED_STATUSES.join(', ')}.`, 400, 'INVALID_STATUS');
-    }
-
-    const membership = await ClassMembership.findByPk(id, {
-      include: [
-        { model: ClassSection, as: 'classSection', attributes: ['id', 'sectionCode', 'capacity'] },
-        { model: User, as: 'student', attributes: ['id', 'firstName', 'lastName', 'email'] }
-      ]
-    });
-    if (!membership) throw new AppError('Enrollment record not found.', 404, 'ENROLLMENT_NOT_FOUND');
-
-    // Capacity check when approving a pending enrollment
-    if (status === 'enrolled' && membership.status === 'pending') {
-      const activeCount = await ClassMembership.count({
-        where: { classId: membership.classId, status: ['enrolled'] }
-      });
-      if (activeCount >= (membership.classSection?.capacity || 40)) {
-        throw new AppError(
-          `Class section "${membership.classSection?.sectionCode}" is at full capacity.`,
-          409,
-          'CLASS_AT_CAPACITY'
-        );
-      }
-    }
-
-    const updates = { status };
-    if (remarks !== undefined) updates.remarks = remarks;
-    if (status === 'completed') updates.completedAt = new Date();
-
-    await membership.update(updates);
-
-    await recordAudit({
-      req,
-      action:     'ENROLLMENT_STATUS_UPDATED',
-      category:   'academic',
-      entityType: 'ClassMembership',
-      entityId:   membership.id,
-      metadata:   { classId: membership.classId, studentId: membership.studentId, oldStatus: membership.status, newStatus: status }
-    });
-
-    // Notify student when their pending enrollment is approved
-    if (status === 'enrolled' && membership.status === 'pending') {
-      await createNotification({
-        userId: membership.studentId,
-        type: 'enrollment',
-        title: `Enrollment Approved: ${membership.classSection?.sectionCode}`,
-        message: `Your enrollment request for ${membership.classSection?.sectionCode} has been approved.`,
-        destinationUrl: '/student/courses'
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: `Enrollment status updated to "${status}".`,
-      data: { membership }
-    });
-  } catch (err) {
-    return next(err);
-  }
-}
-
 module.exports = {
   getInstitution,
   updateInstitution,
@@ -1580,37 +947,24 @@ module.exports = {
   listPrograms,
   createProgram,
   updateProgram,
-  deleteProgram,
   listAcademicYears,
-  getAcademicYearById,
   createAcademicYear,
-  updateAcademicYear,
-  deleteAcademicYear,
   listSemesters,
-  getSemesterById,
   createSemester,
-  updateSemester,
-  deleteSemester,
   listCourses,
   getCourseById,
   createCourse,
   updateCourse,
-  deleteCourse,
   listCourseOfferings,
   createCourseOffering,
   updateCourseOffering,
-  deleteCourseOffering,
   listClasses,
   getClassById,
   createClassSection,
-  updateClassSection,
-  deleteClassSection,
   assignInstructorToClass,
   assignTaToClass,
   listEnrollments,
   enrollStudent,
-  dropStudent,
-  updateEnrollmentStatus,
   transferStudentSection,
   importRecordsCsv
 };
