@@ -166,7 +166,7 @@ module.exports = (sequelize) => {
     tableName: 'student_placements',
     indexes: [
       { fields: ['student_id', 'academic_year_id'], unique: true },
-      { fields: ['academic_year_id', 'program_id', 'year_level', 'cohort_section'] }
+      { name: 'sp_ay_prog_yr_cohort', fields: ['academic_year_id', 'program_id', 'year_level', 'cohort_section'] }
     ]
   });
 
