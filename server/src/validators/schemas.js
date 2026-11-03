@@ -130,12 +130,45 @@ const classSectionSchema = z.object({
   courseOfferingId: z.coerce.number().int().positive(),
   sectionCode: z.string().min(2).max(60),
   name: z.string().min(3).max(150),
+  eligibleProgramId: z.coerce.number().int().positive().optional().nullable(),
+  eligibleYearLevel: z.coerce.number().int().min(1).max(8).optional().nullable(),
+  eligibleCohortSection: z.string().trim().min(1).max(60).optional().nullable(),
   room: z.string().max(80).optional().nullable(),
   schedule: z.string().max(150).optional().nullable(),
   capacity: z.coerce.number().int().min(1).max(500).optional().default(40),
   allowLateSubmissions: z.boolean().optional().default(true),
   latePenaltyPercent: z.coerce.number().min(0).max(100).optional().default(10),
   instructorId: z.coerce.number().int().positive().optional().nullable()
+}).superRefine((section, context) => {
+  if (Boolean(section.eligibleProgramId) !== Boolean(section.eligibleYearLevel)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Eligible program and year level must be set together.',
+      path: ['eligibleProgramId']
+    });
+  }
+});
+
+const studentPlacementSchema = z.object({
+  studentId: z.coerce.number().int().positive(),
+  academicYearId: z.coerce.number().int().positive(),
+  programId: z.coerce.number().int().positive(),
+  yearLevel: z.coerce.number().int().min(1).max(8),
+  cohortSection: z.string().trim().min(1).max(60)
+});
+
+const classEligibilitySchema = z.object({
+  eligibleProgramId: z.coerce.number().int().positive().nullable(),
+  eligibleYearLevel: z.coerce.number().int().min(1).max(8).nullable(),
+  eligibleCohortSection: z.string().trim().min(1).max(60).nullable()
+}).superRefine((eligibility, context) => {
+  if (Boolean(eligibility.eligibleProgramId) !== Boolean(eligibility.eligibleYearLevel)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Eligible program and year level must be set together.',
+      path: ['eligibleProgramId']
+    });
+  }
 });
 
 const moduleSchema = z.object({
@@ -266,6 +299,8 @@ module.exports = {
   courseSchema,
   courseOfferingSchema,
   classSectionSchema,
+  studentPlacementSchema,
+  classEligibilitySchema,
   moduleSchema,
   lessonSchema,
   assignmentSchema,
@@ -273,4 +308,3 @@ module.exports = {
   assessmentSchema,
   gradeCategoriesBulkSchema
 };
-

@@ -18,6 +18,7 @@ const MODEL_ORDER = [
   'Course',
   'CourseOffering',
   'ClassSection',
+  'StudentPlacement',
   'InstructorAssignment',
   'TeachingAssistantAssignment',
   'ClassMembership',
@@ -72,4 +73,3 @@ module.exports = {
     }
   }
 };
-

@@ -1,5 +1,8 @@
 const { sequelize, Sequelize } = require('../models');
-const migration = require('../migrations/20261028000001-create-lms-schema');
+const migrations = [
+  ['20261028000001-create-lms-schema.js', require('../migrations/20261028000001-create-lms-schema')],
+  ['20261103000001-add-student-placements.js', require('../migrations/20261103000001-add-student-placements')]
+];
 const logger = require('../config/logger');
 
 async function runMigrations() {
@@ -13,22 +16,23 @@ async function runMigrations() {
     }
   }).catch(() => {});
 
-  const migrationName = '20261028000001-create-lms-schema.js';
-  const [existing] = await sequelize.query(
-    `SELECT name FROM SequelizeMeta WHERE name = :name`,
-    { replacements: { name: migrationName } }
-  );
-
-  await migration.up(queryInterface, Sequelize);
-
-  if (!existing || existing.length === 0) {
-    await sequelize.query(
-      `INSERT INTO SequelizeMeta (name) VALUES (:name)`,
+  for (const [migrationName, migration] of migrations) {
+    const [existing] = await sequelize.query(
+      `SELECT name FROM SequelizeMeta WHERE name = :name`,
       { replacements: { name: migrationName } }
     );
-    logger.info({ migration: migrationName }, 'Database migration executed and recorded in SequelizeMeta');
-  } else {
-    logger.info({ migration: migrationName }, 'Database schema verified up to date');
+
+    await migration.up(queryInterface, Sequelize);
+
+    if (!existing || existing.length === 0) {
+      await sequelize.query(
+        `INSERT INTO SequelizeMeta (name) VALUES (:name)`,
+        { replacements: { name: migrationName } }
+      );
+      logger.info({ migration: migrationName }, 'Database migration executed and recorded in SequelizeMeta');
+    } else {
+      logger.info({ migration: migrationName }, 'Database schema verified up to date');
+    }
   }
 }
 
@@ -45,4 +49,3 @@ if (require.main === module) {
 }
 
 module.exports = runMigrations;
-

@@ -430,11 +430,21 @@ async function getDashboardSummary(req, res, next) {
       submissions.filter((s) => ['submitted', 'late', 'under_review', 'graded'].includes(s.status)).map((s) => s.assignmentId)
     );
     const pendingAssignments = assignments.filter((a) => !submittedAssignmentIds.has(a.id));
+    const now = Date.now();
+    const upcomingAssignments = pendingAssignments.filter((a) => new Date(a.dueDate).getTime() >= now);
+    const overdueAssignments = pendingAssignments.filter((a) => new Date(a.dueDate).getTime() < now);
 
     const completedAssessmentIds = new Set(
       attempts.filter((a) => ['submitted', 'graded'].includes(a.status)).map((a) => a.assessmentId)
     );
-    const upcomingExams = assessments.filter((a) => !completedAssessmentIds.has(a.id));
+    const incompleteAssessments = assessments.filter((a) => !completedAssessmentIds.has(a.id));
+    const upcomingExams = incompleteAssessments.filter((a) => new Date(a.closeDate).getTime() >= now);
+    const lateAllowedExams = incompleteAssessments.filter(
+      (a) => new Date(a.closeDate).getTime() < now && a.allowLateAttempts
+    );
+    const overdueExams = incompleteAssessments.filter(
+      (a) => new Date(a.closeDate).getTime() < now && !a.allowLateAttempts
+    );
 
     const enrolledCourses = memberships.map((m) => {
       const cls = m.classSection;
@@ -446,9 +456,12 @@ async function getDashboardSummary(req, res, next) {
         sectionCode: cls?.sectionCode,
         schedule: cls?.schedule,
         room: cls?.room,
+        membershipStatus: m.status,
         courseId: course?.id,
         courseCode: course?.code,
         courseTitle: course?.title,
+        courseDescription: course?.description,
+        creditUnits: course?.creditUnits,
         category: course?.category,
         level: course?.level,
         progressPercentage: Number(cp?.progressPercentage || 0),
@@ -470,16 +483,21 @@ async function getDashboardSummary(req, res, next) {
           enrolledCoursesCount: enrolledCourses.length,
           overallCourseProgress: overallProgress,
           pendingAssignmentsCount: pendingAssignments.length,
-          upcomingExamsCount: upcomingExams.length,
+          overdueAssignmentsCount: overdueAssignments.length,
+          upcomingExamsCount: upcomingExams.length + lateAllowedExams.length,
           recentGradesCount: grades.length,
           earnedCertificatesCount: certificates.length
         },
         enrolledCourses,
         pendingAssignments,
+        upcomingAssignments,
+        overdueAssignments,
         upcomingExams,
+        lateAllowedExams,
+        overdueExams,
         recentlyAccessedLessons: lessonProgressList,
         recentPublishedGrades: grades,
-        unreadAnnouncements: announcements,
+        recentAnnouncements: announcements,
         earnedCertificates: certificates
       }
     });
@@ -489,4 +507,3 @@ async function getDashboardSummary(req, res, next) {
 }
 
 module.exports = { getDashboardSummary };
-

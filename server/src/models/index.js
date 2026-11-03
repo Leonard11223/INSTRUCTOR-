@@ -38,6 +38,7 @@ const {
   Course,
   CourseOffering,
   ClassSection,
+  StudentPlacement,
   InstructorAssignment,
   TeachingAssistantAssignment,
   ClassMembership,
@@ -129,6 +130,13 @@ ClassSection.hasMany(ClassMembership, { foreignKey: 'classId', as: 'memberships'
 ClassMembership.belongsTo(ClassSection, { foreignKey: 'classId', as: 'classSection' });
 ClassMembership.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
 User.hasMany(ClassMembership, { foreignKey: 'studentId', as: 'enrollments' });
+StudentPlacement.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+User.hasMany(StudentPlacement, { foreignKey: 'studentId', as: 'placements' });
+StudentPlacement.belongsTo(AcademicYear, { foreignKey: 'academicYearId', as: 'academicYear' });
+AcademicYear.hasMany(StudentPlacement, { foreignKey: 'academicYearId', as: 'studentPlacements' });
+StudentPlacement.belongsTo(Program, { foreignKey: 'programId', as: 'program' });
+Program.hasMany(StudentPlacement, { foreignKey: 'programId', as: 'studentPlacements' });
+ClassSection.belongsTo(Program, { foreignKey: 'eligibleProgramId', as: 'eligibleProgram' });
 
 // 3. Content & Progress Associations
 Course.hasMany(Module, { foreignKey: 'courseId', as: 'modules' });
@@ -248,4 +256,3 @@ module.exports = {
   Sequelize,
   ...models
 };
-

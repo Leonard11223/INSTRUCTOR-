@@ -50,12 +50,58 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
         expect(dashRes.body.data.role).toBe(item.expectedRole);
       }
     });
+
+    it('returns student deadlines separated by date and labels recent announcements accurately', async () => {
+      const res = await studentAgent.get('/api/dashboards/summary');
+      expect(res.status).toBe(200);
+
+      const dashboard = res.body.data;
+      const now = Date.now();
+      expect(dashboard.recentAnnouncements).toBeDefined();
+      expect(dashboard.unreadAnnouncements).toBeUndefined();
+      expect(
+        [...dashboard.upcomingAssignments, ...dashboard.overdueAssignments]
+          .map((assignment) => assignment.id)
+          .sort((a, b) => a - b)
+      ).toEqual(dashboard.pendingAssignments.map((assignment) => assignment.id).sort((a, b) => a - b));
+      expect(
+        dashboard.upcomingAssignments.every((assignment) => new Date(assignment.dueDate).getTime() >= now - 1000)
+      ).toBe(true);
+      expect(
+        dashboard.overdueAssignments.every((assignment) => new Date(assignment.dueDate).getTime() < now + 1000)
+      ).toBe(true);
+      expect(
+        dashboard.upcomingExams.every((assessment) => new Date(assessment.closeDate).getTime() >= now - 1000)
+      ).toBe(true);
+      expect(
+        dashboard.overdueExams.every(
+          (assessment) => new Date(assessment.closeDate).getTime() < now + 1000 && !assessment.allowLateAttempts
+        )
+      ).toBe(true);
+      expect(
+        dashboard.lateAllowedExams.every(
+          (assessment) => new Date(assessment.closeDate).getTime() < now + 1000 && assessment.allowLateAttempts
+        )
+      ).toBe(true);
+      expect(dashboard.metrics.overdueAssignmentsCount).toBe(dashboard.overdueAssignments.length);
+    });
+
+    it('returns only the authenticated student’s placement records', async () => {
+      const meRes = await studentAgent.get('/api/auth/me');
+      const placementsRes = await studentAgent.get('/api/student/placements');
+      expect(placementsRes.status).toBe(200);
+      expect(placementsRes.body.data.placements).toHaveLength(1);
+      expect(placementsRes.body.data.placements[0].studentId).toBe(meRes.body.data.user.id);
+    });
   });
 
   describe('2. Server-Side RBAC & Privilege Escalation Protection', () => {
     it('prevents students and instructors from accessing Super Admin user management or audit logs', async () => {
       const studUsersRes = await studentAgent.get('/api/users');
       expect(studUsersRes.status).toBe(403);
+
+      const studPlacementsRes = await studentAgent.get('/api/student-placements');
+      expect(studPlacementsRes.status).toBe(403);
 
       const instAuditRes = await instructorAgent.get('/api/audit-logs');
       expect(instAuditRes.status).toBe(403);
@@ -83,7 +129,7 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
   });
 
   describe('3. Academic Management, Course Creation & Enrollment Workflows', () => {
-    it('allows Academic Admin to create a course, offering, class section, and import students via CSV', async () => {
+    it('imports students, assigns their cohort placement, and enrolls matching students into a class', async () => {
       const courseRes = await acadAdminAgent.post('/api/courses').send({
         departmentId: 1,
         programId: 1,
@@ -96,12 +142,63 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       expect(courseRes.status).toBe(201);
 
       const csvRes = await acadAdminAgent.post('/api/enrollments/import-csv').send({
-        classId: 1,
         defaultRole: 'student',
         csvText: 'firstName,lastName,email,studentNumber\nAria,Chen,ariachen@academy.edu,2026-00501'
       });
       expect(csvRes.status).toBe(201);
       expect(csvRes.body.data.importedCount).toBe(1);
+
+      const usersRes = await acadAdminAgent.get('/api/users?search=ariachen&role=student');
+      const aria = usersRes.body.data.users.find((user) => user.email === 'ariachen@academy.edu');
+      expect(aria).toBeDefined();
+
+      const ariaAgent = createAgent(app);
+      const ariaLoginRes = await ariaAgent.post('/api/auth/login').send({
+        email: 'ariachen@academy.edu',
+        password: 'Stud@12345'
+      });
+      expect(ariaLoginRes.status).toBe(200);
+      const unplacedEnrollRes = await ariaAgent.post('/api/enrollments').send({ classId: 2 });
+      expect(unplacedEnrollRes.status).toBe(403);
+      expect(unplacedEnrollRes.body.code).toBe('PLACEMENT_REQUIRED');
+
+      const [yearsRes, programsRes] = await Promise.all([
+        acadAdminAgent.get('/api/academic-years'),
+        acadAdminAgent.get('/api/programs')
+      ]);
+      const currentYear = yearsRes.body.data.academicYears.find((year) => year.isCurrent);
+      const bsit = programsRes.body.data.programs.find((program) => program.code === 'BSIT');
+      const eligibilityRes = await acadAdminAgent.put('/api/classes/2/eligibility').send({
+        eligibleProgramId: bsit.id,
+        eligibleYearLevel: 4,
+        eligibleCohortSection: 'B'
+      });
+      expect(eligibilityRes.status).toBe(200);
+
+      const placementRes = await acadAdminAgent.put('/api/student-placements').send({
+        studentId: aria.id,
+        academicYearId: currentYear.id,
+        programId: bsit.id,
+        yearLevel: 4,
+        cohortSection: 'B'
+      });
+      expect(placementRes.status).toBe(201);
+
+      const cohortRes = await acadAdminAgent.post('/api/classes/2/enroll-eligible');
+      expect(cohortRes.status).toBe(200);
+      expect(cohortRes.body.data.enrolledCount).toBe(1);
+
+      const mismatchedEnrollRes = await studentAgent.post('/api/enrollments').send({ classId: 2 });
+      expect(mismatchedEnrollRes.status).toBe(403);
+      expect(mismatchedEnrollRes.body.code).toBe('SECTION_NOT_ELIGIBLE');
+
+      const studentMe = await studentAgent.get('/api/auth/me');
+      const registrarOverrideRes = await acadAdminAgent.post('/api/enrollments').send({
+        classId: 2,
+        studentId: studentMe.body.data.user.id
+      });
+      expect(registrarOverrideRes.status).toBe(403);
+      expect(registrarOverrideRes.body.code).toBe('SECTION_NOT_ELIGIBLE');
     });
 
     it('prevents duplicate student enrollment in the same class section', async () => {

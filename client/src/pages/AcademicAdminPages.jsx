@@ -1163,11 +1163,20 @@ export function ClassesAndSectionsPage() {
   const { addToast } = useToast();
   const [classOpen, setClassOpen] = useState(false);
   const [taModalClass, setTaModalClass] = useState(null);
+  const [eligibilityClass, setEligibilityClass] = useState(null);
+  const [eligibilityForm, setEligibilityForm] = useState({
+    eligibleProgramId: '',
+    eligibleYearLevel: '',
+    eligibleCohortSection: ''
+  });
 
   const [classForm, setClassForm] = useState({
     courseOfferingId: 1,
     sectionCode: 'BSIT 4-C',
     name: 'BSIT 4-C — Integrative Programming',
+    eligibleProgramId: '',
+    eligibleYearLevel: '',
+    eligibleCohortSection: '',
     room: 'NetAcad Lab 305',
     schedule: 'Fri 09:00 - 12:00',
     capacity: 40,
@@ -1193,10 +1202,26 @@ export function ClassesAndSectionsPage() {
     queryFn: lmsApi.listOfferings
   });
 
+  const { data: programsData } = useQuery({
+    queryKey: ['programs'],
+    queryFn: lmsApi.listPrograms
+  });
+
   const handleCreateClass = async (e) => {
     e.preventDefault();
+    const hasProgram = Boolean(classForm.eligibleProgramId);
+    const hasYearLevel = Boolean(classForm.eligibleYearLevel);
+    if (hasProgram !== hasYearLevel) {
+      addToast('Choose both an eligible program and year level, or leave both unrestricted.', 'error');
+      return;
+    }
     try {
-      await lmsApi.createClass(classForm);
+      await lmsApi.createClass({
+        ...classForm,
+        eligibleProgramId: hasProgram ? Number(classForm.eligibleProgramId) : null,
+        eligibleYearLevel: hasYearLevel ? Number(classForm.eligibleYearLevel) : null,
+        eligibleCohortSection: classForm.eligibleCohortSection.trim() || null
+      });
       addToast('Class section created with default weighted categories.');
       setClassOpen(false);
       queryClient.invalidateQueries({ queryKey: ['classes'] });
@@ -1218,10 +1243,44 @@ export function ClassesAndSectionsPage() {
     }
   };
 
+  const openEligibilityEditor = (classSection) => {
+    setEligibilityClass(classSection);
+    setEligibilityForm({
+      eligibleProgramId: classSection.eligibleProgramId ? String(classSection.eligibleProgramId) : '',
+      eligibleYearLevel: classSection.eligibleYearLevel ? String(classSection.eligibleYearLevel) : '',
+      eligibleCohortSection: classSection.eligibleCohortSection || ''
+    });
+  };
+
+  const handleSaveEligibility = async (e) => {
+    e.preventDefault();
+    if (!eligibilityClass) return;
+    const hasProgram = Boolean(eligibilityForm.eligibleProgramId);
+    const hasYearLevel = Boolean(eligibilityForm.eligibleYearLevel);
+    if (hasProgram !== hasYearLevel) {
+      addToast('Choose both an eligible program and year level, or leave both unrestricted.', 'error');
+      return;
+    }
+
+    try {
+      await lmsApi.updateClassEligibility(eligibilityClass.id, {
+        eligibleProgramId: hasProgram ? Number(eligibilityForm.eligibleProgramId) : null,
+        eligibleYearLevel: hasYearLevel ? Number(eligibilityForm.eligibleYearLevel) : null,
+        eligibleCohortSection: eligibilityForm.eligibleCohortSection.trim() || null
+      });
+      addToast(`Eligibility rules saved for ${eligibilityClass.sectionCode}.`);
+      setEligibilityClass(null);
+      queryClient.invalidateQueries({ queryKey: ['classes'] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
   if (isLoading) return <LoadingState />;
 
   const classes = classesData?.data?.classes || [];
   const offerings = offeringsData?.data?.offerings || [];
+  const programs = programsData?.data?.programs || [];
 
   return (
     <div className="space-y-6">
@@ -1266,8 +1325,21 @@ export function ClassesAndSectionsPage() {
               <p>
                 <strong>Enrolled Learners:</strong> {cls.memberships?.length || 0} / {cls.capacity}
               </p>
+              <p>
+                <strong>Eligible Cohort:</strong>{' '}
+                {cls.eligibleProgram?.code
+                  ? `${cls.eligibleProgram.code} · Year ${cls.eligibleYearLevel}${cls.eligibleCohortSection ? ` · Section ${cls.eligibleCohortSection}` : ''}`
+                  : 'All programs / years'}
+              </p>
             </div>
-            <div className="pt-2 flex justify-end">
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => openEligibilityEditor(cls)}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-xs font-semibold text-slate-700"
+              >
+                Set Eligibility
+              </button>
               <button
                 type="button"
                 onClick={() => setTaModalClass(cls)}
@@ -1322,6 +1394,46 @@ export function ClassesAndSectionsPage() {
               className="w-full px-3 py-2 rounded-lg border border-slate-300"
             />
           </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Eligible Program</label>
+              <select
+                value={classForm.eligibleProgramId}
+                onChange={(e) => setClassForm({ ...classForm, eligibleProgramId: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="">All programs</option>
+                {programs.map((program) => (
+                  <option key={program.id} value={program.id}>{program.code}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Year Level</label>
+              <select
+                value={classForm.eligibleYearLevel}
+                onChange={(e) => setClassForm({ ...classForm, eligibleYearLevel: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="">Any year</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((year) => (
+                  <option key={year} value={year}>Year {year}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Cohort / Section</label>
+              <input
+                value={classForm.eligibleCohortSection}
+                onChange={(e) => setClassForm({ ...classForm, eligibleCohortSection: e.target.value })}
+                placeholder="e.g. A"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Set both program and year level to restrict enrollment to a cohort. Leave both blank for an unrestricted section.
+          </p>
           <div>
             <label className="block font-semibold mb-1">Schedule</label>
             <input
@@ -1332,6 +1444,52 @@ export function ClassesAndSectionsPage() {
           </div>
           <button type="submit" className="w-full py-2 bg-blue-600 text-white font-semibold rounded-lg">
             Create Class Section
+          </button>
+        </form>
+      </ModalDialog>
+
+      <ModalDialog
+        isOpen={Boolean(eligibilityClass)}
+        onClose={() => setEligibilityClass(null)}
+        title={`Set Eligible Cohort — ${eligibilityClass?.sectionCode || ''}`}
+      >
+        <form onSubmit={handleSaveEligibility} className="space-y-3 text-xs">
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Eligible Program</label>
+              <select
+                value={eligibilityForm.eligibleProgramId}
+                onChange={(e) => setEligibilityForm({ ...eligibilityForm, eligibleProgramId: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="">All programs</option>
+                {programs.map((program) => <option key={program.id} value={program.id}>{program.code}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Year Level</label>
+              <select
+                value={eligibilityForm.eligibleYearLevel}
+                onChange={(e) => setEligibilityForm({ ...eligibilityForm, eligibleYearLevel: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="">Any year</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((year) => <option key={year} value={year}>Year {year}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Cohort / Section</label>
+              <input
+                value={eligibilityForm.eligibleCohortSection}
+                onChange={(e) => setEligibilityForm({ ...eligibilityForm, eligibleCohortSection: e.target.value })}
+                placeholder="e.g. A"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+          </div>
+          <p className="text-slate-500">Program and year level must be set together. Leave both blank to make the section unrestricted.</p>
+          <button type="submit" className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">
+            Save Eligibility Rules
           </button>
         </form>
       </ModalDialog>
@@ -1374,13 +1532,45 @@ export function ClassesAndSectionsPage() {
 export function EnrollmentManagementPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
-  const [selectedClassId, setSelectedClassId] = useState(1);
-  const [studentIdToEnroll, setStudentIdToEnroll] = useState(9);
+  const [selectedClassId, setSelectedClassId] = useState('');
+  const [studentIdToEnroll, setStudentIdToEnroll] = useState('');
+  const [selectedPlacementYearId, setSelectedPlacementYearId] = useState('');
+  const [placementForm, setPlacementForm] = useState({
+    studentId: '',
+    programId: '',
+    yearLevel: '',
+    cohortSection: ''
+  });
   const [csvText, setCsvText] = useState('firstName,lastName,email,studentNumber\nLucas,Graham,lucas.graham@academy.edu,2026-00311\nHannah,Abbott,hannah.abbott@academy.edu,2026-00312');
 
   const { data: classesData } = useQuery({
     queryKey: ['classes'],
     queryFn: lmsApi.listClasses
+  });
+
+  const { data: usersData } = useQuery({
+    queryKey: ['users', 'students'],
+    queryFn: () => lmsApi.listUsers({ role: 'student', status: 'active', limit: 200 })
+  });
+
+  const { data: programsData } = useQuery({
+    queryKey: ['programs'],
+    queryFn: lmsApi.listPrograms
+  });
+
+  const { data: academicYearsData } = useQuery({
+    queryKey: ['academic-years'],
+    queryFn: lmsApi.listAcademicYears
+  });
+
+  const academicYears = academicYearsData?.data?.academicYears || [];
+  const placementYearId = Number(
+    selectedPlacementYearId || academicYears.find((year) => year.isCurrent)?.id || academicYears[0]?.id || 0
+  );
+  const { data: placementsData } = useQuery({
+    queryKey: ['student-placements', placementYearId],
+    queryFn: () => lmsApi.listStudentPlacements({ academicYearId: placementYearId }),
+    enabled: Boolean(placementYearId)
   });
 
   const { data: enrollmentsData, isLoading } = useQuery({
@@ -1399,16 +1589,45 @@ export function EnrollmentManagementPage() {
     }
   };
 
+  const handleSetPlacement = async (e) => {
+    e.preventDefault();
+    try {
+      await lmsApi.setStudentPlacement({
+        ...placementForm,
+        studentId: Number(placementForm.studentId),
+        academicYearId: placementYearId,
+        programId: Number(placementForm.programId),
+        yearLevel: Number(placementForm.yearLevel)
+      });
+      addToast('Student academic placement saved.');
+      queryClient.invalidateQueries({ queryKey: ['student-placements', placementYearId] });
+      queryClient.invalidateQueries({ queryKey: ['courses', 'catalog'] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleEnrollCohort = async () => {
+    if (!selectedClassId) return;
+    try {
+      const res = await lmsApi.enrollEligibleStudents(selectedClassId);
+      addToast(res.message);
+      queryClient.invalidateQueries({ queryKey: ['enrollments'] });
+      queryClient.invalidateQueries({ queryKey: ['classes'] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
   const handleCsvImport = async (e) => {
     e.preventDefault();
     try {
       const res = await lmsApi.importCsv({
-        classId: Number(selectedClassId),
         defaultRole: 'student',
         csvText
       });
       addToast(res.message);
-      queryClient.invalidateQueries({ queryKey: ['enrollments'] });
+      queryClient.invalidateQueries({ queryKey: ['users', 'students'] });
     } catch (err) {
       addToast(extractErrorMessage(err), 'error');
     }
@@ -1416,13 +1635,17 @@ export function EnrollmentManagementPage() {
 
   const classes = classesData?.data?.classes || [];
   const enrollments = enrollmentsData?.data?.enrollments || [];
+  const students = usersData?.data?.users || [];
+  const programs = programsData?.data?.programs || [];
+  const placements = placementsData?.data?.placements || [];
+  const selectedClass = classes.find((classSection) => classSection.id === Number(selectedClassId));
 
   return (
     <div className="space-y-6">
       <PageHeader
         badge="Registrar Operations"
-        title="Student Enrollment & Bulk CSV Record Import"
-        subtitle="Enroll students in class offerings, prevent duplicate enrollments, and bulk-import rosters via CSV."
+        title="Student Placement & Cohort Enrollment"
+        subtitle="Set each student's program, year, and section, then enroll the matching cohort into instructor-led classes."
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1432,33 +1655,154 @@ export function EnrollmentManagementPage() {
             <label className="block font-semibold mb-1">Target Class Section</label>
             <select
               value={selectedClassId}
-              onChange={(e) => setSelectedClassId(Number(e.target.value))}
+              onChange={(e) => setSelectedClassId(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
             >
+              <option value="">Choose a class section</option>
               {classes.map((c) => (
                 <option key={c.id} value={c.id}>{c.sectionCode} — {c.name}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block font-semibold mb-1">Student Account ID</label>
-            <input
-              type="number"
+            <label className="block font-semibold mb-1">Student</label>
+            <select
               value={studentIdToEnroll}
               onChange={(e) => setStudentIdToEnroll(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300"
-            />
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+            >
+              <option value="">Choose a student</option>
+              {students.map((student) => (
+                <option key={student.id} value={student.id}>
+                  {student.firstName} {student.lastName} · {student.studentNumber || `ID ${student.id}`}
+                </option>
+              ))}
+            </select>
           </div>
-          <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">
+          <div className="flex flex-wrap gap-2">
+          <button type="submit" disabled={!selectedClassId || !studentIdToEnroll} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-lg">
             Enroll Student in Section
           </button>
+          <button
+            type="button"
+            disabled={!selectedClassId || !selectedClass?.eligibleProgramId || !selectedClass?.eligibleYearLevel}
+            onClick={handleEnrollCohort}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold rounded-lg"
+          >
+            Enroll Matching Cohort
+          </button>
+          </div>
+          {selectedClass && (
+            <p className="text-slate-500">
+              Eligibility: {selectedClass.eligibleProgram?.code || selectedClass.eligibleProgramId || 'No program'} ·
+              {selectedClass.eligibleYearLevel ? ` Year ${selectedClass.eligibleYearLevel}` : ' Any year'} ·
+              {selectedClass.eligibleCohortSection ? ` Section ${selectedClass.eligibleCohortSection}` : ' Any section'}
+            </p>
+          )}
         </form>
 
+        <form onSubmit={handleSetPlacement} className="bg-white rounded-xl border border-slate-200 p-5 space-y-3 text-xs">
+          <h2 className="text-base font-bold text-slate-900">Assign Student Placement</h2>
+          <div>
+            <label className="block font-semibold mb-1">Academic Year</label>
+            <select
+              value={placementYearId || ''}
+              onChange={(e) => setSelectedPlacementYearId(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+            >
+              {academicYears.map((year) => (
+                <option key={year.id} value={year.id}>{year.name}{year.isCurrent ? ' (Current)' : ''}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Student</label>
+            <select
+              required
+              value={placementForm.studentId}
+              onChange={(e) => setPlacementForm({ ...placementForm, studentId: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+            >
+              <option value="">Choose a student</option>
+              {students.map((student) => (
+                <option key={student.id} value={student.id}>
+                  {student.firstName} {student.lastName} · {student.studentNumber || `ID ${student.id}`}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Program</label>
+              <select
+                required
+                value={placementForm.programId}
+                onChange={(e) => setPlacementForm({ ...placementForm, programId: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="">Choose</option>
+                {programs.map((program) => <option key={program.id} value={program.id}>{program.code}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Year</label>
+              <select
+                required
+                value={placementForm.yearLevel}
+                onChange={(e) => setPlacementForm({ ...placementForm, yearLevel: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="">Choose</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((year) => <option key={year} value={year}>Year {year}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Section</label>
+              <input
+                required
+                value={placementForm.cohortSection}
+                onChange={(e) => setPlacementForm({ ...placementForm, cohortSection: e.target.value })}
+                placeholder="A"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+          </div>
+          <button type="submit" disabled={!placementYearId} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-lg">
+            Save Placement
+          </button>
+        </form>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+        <h2 className="text-base font-bold text-slate-900">Current Year Student Placements</h2>
+        {placements.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="text-slate-500 border-b">
+                <tr><th className="py-2">Student</th><th>Program</th><th>Year</th><th>Section</th></tr>
+              </thead>
+              <tbody>
+                {placements.map((placement) => (
+                  <tr key={placement.id} className="border-b border-slate-100">
+                    <td className="py-2">{placement.student?.firstName} {placement.student?.lastName} · {placement.student?.studentNumber || placement.studentId}</td>
+                    <td>{placement.program?.code}</td>
+                    <td>Year {placement.yearLevel}</td>
+                    <td>{placement.cohortSection}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="text-xs text-slate-500">No placements have been assigned for this academic year.</p>}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <form onSubmit={handleCsvImport} className="bg-white rounded-xl border border-slate-200 p-5 space-y-3 text-xs">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-slate-900">Bulk CSV Student Import</h2>
+            <h2 className="text-base font-bold text-slate-900">Bulk CSV Student Account Import</h2>
             <Upload className="w-4 h-4 text-blue-600" />
           </div>
+          <p className="text-slate-500">Import creates accounts only. Assign placements above, then enroll the matching cohort.</p>
           <p className="text-slate-500">Format: <code>firstName,lastName,email,studentNumber</code></p>
           <textarea
             rows={4}
@@ -1467,7 +1811,7 @@ export function EnrollmentManagementPage() {
             className="w-full p-3 rounded-lg border border-slate-300 font-mono text-[11px]"
           />
           <button type="submit" className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg">
-            Import & Enroll CSV Records
+            Import Student Accounts
           </button>
         </form>
       </div>
@@ -1595,4 +1939,3 @@ export function GradeApprovalsPage() {
     </div>
   );
 }
-

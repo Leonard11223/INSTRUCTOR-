@@ -86,10 +86,16 @@ export const lmsApi = {
   listClasses: () => apiClient.get('/classes').then((r) => r.data),
   getClassById: (id) => apiClient.get(`/classes/${id}`).then((r) => r.data),
   createClass: (data) => apiClient.post('/classes', data).then((r) => r.data),
+  updateClassEligibility: (classId, data) =>
+    apiClient.put(`/classes/${classId}/eligibility`, data).then((r) => r.data),
   assignInstructor: (classId, data) => apiClient.post(`/classes/${classId}/instructors`, data).then((r) => r.data),
   assignTa: (classId, data) => apiClient.post(`/classes/${classId}/teaching-assistants`, data).then((r) => r.data),
   listEnrollments: (params) => apiClient.get('/enrollments', { params }).then((r) => r.data),
   enrollStudent: (data) => apiClient.post('/enrollments', data).then((r) => r.data),
+  listStudentPlacements: (params) => apiClient.get('/student-placements', { params }).then((r) => r.data),
+  getMyPlacements: () => apiClient.get('/student/placements').then((r) => r.data),
+  setStudentPlacement: (data) => apiClient.put('/student-placements', data).then((r) => r.data),
+  enrollEligibleStudents: (classId) => apiClient.post(`/classes/${classId}/enroll-eligible`).then((r) => r.data),
   transferStudent: (data) => apiClient.post('/enrollments/transfer', data).then((r) => r.data),
   importCsv: (data) => apiClient.post('/enrollments/import-csv', data).then((r) => r.data),
 

@@ -131,6 +131,9 @@ module.exports = (sequelize) => {
     courseOfferingId: { type: DataTypes.INTEGER, allowNull: false, field: 'course_offering_id' },
     sectionCode: { type: DataTypes.STRING(60), allowNull: false, field: 'section_code' },
     name: { type: DataTypes.STRING(150), allowNull: false },
+    eligibleProgramId: { type: DataTypes.INTEGER, allowNull: true, field: 'eligible_program_id' },
+    eligibleYearLevel: { type: DataTypes.INTEGER, allowNull: true, field: 'eligible_year_level' },
+    eligibleCohortSection: { type: DataTypes.STRING(60), allowNull: true, field: 'eligible_cohort_section' },
     room: { type: DataTypes.STRING(80), allowNull: true },
     schedule: { type: DataTypes.STRING(150), allowNull: true },
     capacity: { type: DataTypes.INTEGER, defaultValue: 40 },
@@ -149,6 +152,21 @@ module.exports = (sequelize) => {
     tableName: 'classes',
     indexes: [
       { fields: ['course_offering_id', 'section_code'], unique: true }
+    ]
+  });
+
+  const StudentPlacement = sequelize.define('StudentPlacement', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    studentId: { type: DataTypes.INTEGER, allowNull: false, field: 'student_id' },
+    academicYearId: { type: DataTypes.INTEGER, allowNull: false, field: 'academic_year_id' },
+    programId: { type: DataTypes.INTEGER, allowNull: false, field: 'program_id' },
+    yearLevel: { type: DataTypes.INTEGER, allowNull: false, field: 'year_level' },
+    cohortSection: { type: DataTypes.STRING(60), allowNull: false, field: 'cohort_section' }
+  }, {
+    tableName: 'student_placements',
+    indexes: [
+      { fields: ['student_id', 'academic_year_id'], unique: true },
+      { fields: ['academic_year_id', 'program_id', 'year_level', 'cohort_section'] }
     ]
   });
 
@@ -210,9 +228,9 @@ module.exports = (sequelize) => {
     Course,
     CourseOffering,
     ClassSection,
+    StudentPlacement,
     InstructorAssignment,
     TeachingAssistantAssignment,
     ClassMembership
   };
 };
-

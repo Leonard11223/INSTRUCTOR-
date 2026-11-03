@@ -56,11 +56,7 @@ import {
   StudentGradesAndProgressPage,
   StudentCertificatesPage,
   StudentClassesSubPage,
-  StudentAnalyticsSubPage,
-  StudentDirectorySubPage,
-  StudentCommunicationSubPage,
   StudentCalendarSubPage,
-  StudentSettingsSubPage,
   StudentHelpSupportSubPage
 } from './pages/StudentPages';
 
@@ -486,23 +482,7 @@ export default function App() {
           path="/student/reports/:subview"
           element={
             <ProtectedRoute allowedRoles={['student']}>
-              <StudentAnalyticsSubPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/student/students/:subview"
-          element={
-            <ProtectedRoute allowedRoles={['student']}>
-              <StudentDirectorySubPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/student/communication/:subview"
-          element={
-            <ProtectedRoute allowedRoles={['student']}>
-              <StudentCommunicationSubPage />
+              <Navigate to="/student/grades" replace />
             </ProtectedRoute>
           }
         />
@@ -518,7 +498,7 @@ export default function App() {
           path="/student/settings/:subview"
           element={
             <ProtectedRoute allowedRoles={['student']}>
-              <StudentSettingsSubPage />
+              <Navigate to="/profile" replace />
             </ProtectedRoute>
           }
         />
@@ -536,4 +516,3 @@ export default function App() {
     </Routes>
   );
 }
-
