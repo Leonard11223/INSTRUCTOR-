@@ -82,7 +82,7 @@ function downloadCourseBadgePng(cert) {
   ctx.fillStyle = '#6ee7b7';
   ctx.font = 'bold 15px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('AETHERIA INSTITUTE & NETWORKING ACADEMY', 320, 66);
+  ctx.fillText('MINDORO STATE UNIVERSITY (MinSU) · NETACAD', 320, 66);
 
   ctx.fillStyle = '#fbbf24';
   ctx.font = 'bold 18px sans-serif';
@@ -172,7 +172,7 @@ function downloadCertificatePng(cert) {
   ctx.fillStyle = '#1e3a8a';
   ctx.font = 'bold 24px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('AETHERIA INSTITUTE OF TECHNOLOGY & NETWORKING ACADEMY', 700, 145);
+  ctx.fillText('MINDORO STATE UNIVERSITY (MinSU) — NETWORKING ACADEMY', 700, 145);
 
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 48px serif';
@@ -2081,7 +2081,7 @@ export function StudentCertificatesPage() {
                   <div className="lg:col-span-4 bg-gradient-to-b from-slate-900 via-emerald-950 to-slate-900 text-white rounded-2xl p-6 border-2 border-emerald-500/40 flex flex-col items-center justify-between text-center shadow-md">
                     <div className="space-y-1">
                       <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-300 block">
-                        Aetheria Networking Academy
+                        Mindoro State University (MinSU)
                       </span>
                       <span className="text-xs font-extrabold uppercase tracking-wider text-amber-300 block">
                         ★ Verified Digital Skill Badge ★
@@ -2130,7 +2130,7 @@ export function StudentCertificatesPage() {
                         <ShieldCheck className="w-8 h-8 text-blue-600 shrink-0" />
                         <div>
                           <p className="text-xs font-bold uppercase tracking-widest text-blue-700">
-                            Aetheria Institute of Technology & Networking Academy
+                            Mindoro State University (MinSU) · E-Learn & Networking Academy
                           </p>
                           <h3 className="text-xl font-extrabold text-slate-900">
                             Certificate of Course Completion

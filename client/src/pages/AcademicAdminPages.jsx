@@ -19,7 +19,11 @@ import {
   Plus,
   Upload,
   CheckCircle2,
-  RotateCcw
+  RotateCcw,
+  ChevronLeft,
+  ChevronRight,
+  Edit2,
+  Trash2
 } from 'lucide-react';
 import { lmsApi, extractErrorMessage } from '../services/api';
 import {
@@ -144,27 +148,47 @@ export function AcademicDashboardPage() {
 export function DepartmentsAndProgramsPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
+
+  // Modals state
   const [deptOpen, setDeptOpen] = useState(false);
+  const [editDeptOpen, setEditDeptOpen] = useState(false);
+  const [editingDept, setEditingDept] = useState(null);
+
   const [progOpen, setProgOpen] = useState(false);
+  const [editProgOpen, setEditProgOpen] = useState(false);
+  const [editingProg, setEditingProg] = useState(null);
 
-  const [deptForm, setDeptForm] = useState({ code: '', name: '', headName: '', description: '' });
+  // Pagination for programs
+  const [progPage, setProgPage] = useState(1);
+  const [progLimit, setProgLimit] = useState(5);
+
+  // Department forms
+  const [deptForm, setDeptForm] = useState({ code: '', name: '', headName: '', description: '', status: 'active' });
+  const [editDeptForm, setEditDeptForm] = useState({ code: '', name: '', headName: '', description: '', status: 'active' });
+
+  // Program forms
   const [progForm, setProgForm] = useState({ departmentId: 1, code: '', name: '', degreeType: 'Bachelor', durationYears: 4 });
+  const [editProgForm, setEditProgForm] = useState({ departmentId: 1, code: '', name: '', degreeType: 'Bachelor', durationYears: 4 });
 
-  const { data: deptData, isLoading } = useQuery({
+  const { data: deptData, isLoading: deptLoading } = useQuery({
     queryKey: ['departments'],
     queryFn: lmsApi.listDepartments
   });
 
-  const { data: progData } = useQuery({
+  const { data: progData, isLoading: progLoading } = useQuery({
     queryKey: ['programs'],
     queryFn: lmsApi.listPrograms
   });
 
+  const isLoading = deptLoading || progLoading;
+
+  // Department handlers
   const handleCreateDept = async (e) => {
     e.preventDefault();
     try {
       await lmsApi.createDepartment(deptForm);
-      addToast('Department created.');
+      addToast('Department created successfully.');
+      setDeptForm({ code: '', name: '', headName: '', description: '', status: 'active' });
       setDeptOpen(false);
       queryClient.invalidateQueries({ queryKey: ['departments'] });
     } catch (err) {
@@ -172,11 +196,51 @@ export function DepartmentsAndProgramsPage() {
     }
   };
 
+  const handleOpenEditDept = (dept) => {
+    setEditingDept(dept);
+    setEditDeptForm({
+      code: dept.code || '',
+      name: dept.name || '',
+      headName: dept.headName || '',
+      description: dept.description || '',
+      status: dept.status || 'active'
+    });
+    setEditDeptOpen(true);
+  };
+
+  const handleSaveEditDept = async (e) => {
+    e.preventDefault();
+    if (!editingDept) return;
+    try {
+      await lmsApi.updateDepartment(editingDept.id, editDeptForm);
+      addToast(`Department "${editDeptForm.code}" updated successfully.`);
+      setEditDeptOpen(false);
+      setEditingDept(null);
+      queryClient.invalidateQueries({ queryKey: ['departments'] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleDeleteDept = async (dept) => {
+    if (window.confirm(`Are you sure you want to delete department "${dept.code} - ${dept.name}"?`)) {
+      try {
+        const res = await lmsApi.deleteDepartment(dept.id);
+        addToast(res?.message || 'Department deleted successfully.');
+        queryClient.invalidateQueries({ queryKey: ['departments'] });
+      } catch (err) {
+        addToast(extractErrorMessage(err), 'error');
+      }
+    }
+  };
+
+  // Program handlers
   const handleCreateProg = async (e) => {
     e.preventDefault();
     try {
       await lmsApi.createProgram(progForm);
-      addToast('Academic program created.');
+      addToast('Academic program created successfully.');
+      setProgForm({ departmentId: departments[0]?.id || 1, code: '', name: '', degreeType: 'Bachelor', durationYears: 4 });
       setProgOpen(false);
       queryClient.invalidateQueries({ queryKey: ['programs'] });
     } catch (err) {
@@ -184,10 +248,50 @@ export function DepartmentsAndProgramsPage() {
     }
   };
 
+  const handleOpenEditProg = (prog) => {
+    setEditingProg(prog);
+    setEditProgForm({
+      departmentId: prog.departmentId || departments[0]?.id || 1,
+      code: prog.code || '',
+      name: prog.name || '',
+      degreeType: prog.degreeType || 'Bachelor',
+      durationYears: prog.durationYears || 4
+    });
+    setEditProgOpen(true);
+  };
+
+  const handleSaveEditProg = async (e) => {
+    e.preventDefault();
+    if (!editingProg) return;
+    try {
+      await lmsApi.updateProgram(editingProg.id, editProgForm);
+      addToast(`Program "${editProgForm.code}" updated successfully.`);
+      setEditProgOpen(false);
+      setEditingProg(null);
+      queryClient.invalidateQueries({ queryKey: ['programs'] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleDeleteProg = async (prog) => {
+    if (window.confirm(`Are you sure you want to delete degree program "${prog.code} - ${prog.name}"?`)) {
+      try {
+        const res = await lmsApi.deleteProgram(prog.id);
+        addToast(res?.message || 'Academic program deleted successfully.');
+        queryClient.invalidateQueries({ queryKey: ['programs'] });
+      } catch (err) {
+        addToast(extractErrorMessage(err), 'error');
+      }
+    }
+  };
+
   if (isLoading) return <LoadingState />;
 
   const departments = deptData?.data?.departments || [];
   const programs = progData?.data?.programs || [];
+  const totalProgPages = Math.max(1, Math.ceil(programs.length / progLimit));
+  const pagedPrograms = programs.slice((progPage - 1) * progLimit, progPage * progLimit);
 
   return (
     <div className="space-y-6">
@@ -217,66 +321,170 @@ export function DepartmentsAndProgramsPage() {
         }
       />
 
+      {/* Departments Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {departments.map((d) => (
-          <div key={d.id} className="bg-white rounded-xl border border-slate-200 p-5 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded">
-                {d.code}
-              </span>
-              <StatusBadge status={d.status} />
+          <div key={d.id} className="bg-white rounded-xl border border-slate-200 p-5 space-y-2.5 flex flex-col justify-between hover:shadow-xs transition-shadow">
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded">
+                  {d.code}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <StatusBadge status={d.status} />
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditDept(d)}
+                    title="Edit Department"
+                    className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteDept(d)}
+                    title="Delete Department"
+                    className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 mt-2">{d.name}</h3>
+              <p className="text-xs text-slate-600 mt-1">{d.description || 'No description provided.'}</p>
             </div>
-            <h3 className="text-sm font-bold text-slate-900">{d.name}</h3>
-            <p className="text-xs text-slate-600">{d.description}</p>
-            <p className="text-xs text-slate-500 pt-2 border-t border-slate-100">
-              Head: <strong>{d.headName || 'TBA'}</strong> · Courses: <strong>{d.courses?.length || 0}</strong>
+            <p className="text-xs text-slate-500 pt-2 border-t border-slate-100 flex items-center justify-between">
+              <span>Head: <strong className="text-slate-800">{d.headName || 'TBA'}</strong></span>
+              <span>Courses: <strong className="text-slate-800">{d.courses?.length || 0}</strong></span>
             </p>
           </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      {/* Academic Degree Programs Table */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
         <div className="px-5 py-4 border-b border-slate-200">
           <h2 className="text-base font-bold text-slate-900">Academic Degree Programs</h2>
         </div>
-        <table className="w-full text-left text-xs">
-          <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
-            <tr>
-              <th className="px-4 py-3">Program Code</th>
-              <th className="px-4 py-3">Program Title</th>
-              <th className="px-4 py-3">Department</th>
-              <th className="px-4 py-3">Degree Type</th>
-              <th className="px-4 py-3">Duration</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {programs.map((p) => (
-              <tr key={p.id}>
-                <td className="px-4 py-3 font-mono font-bold text-blue-700">{p.code}</td>
-                <td className="px-4 py-3 font-semibold text-slate-900">{p.name}</td>
-                <td className="px-4 py-3">{p.department?.name}</td>
-                <td className="px-4 py-3">{p.degreeType}</td>
-                <td className="px-4 py-3">{p.durationYears} Years</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3">Program Code</th>
+                <th className="px-4 py-3">Program Title</th>
+                <th className="px-4 py-3">Department</th>
+                <th className="px-4 py-3">Degree Type</th>
+                <th className="px-4 py-3">Duration</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {pagedPrograms.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-6 text-center text-slate-500 text-xs">
+                    No degree programs found. Create a new program using the button above.
+                  </td>
+                </tr>
+              ) : (
+                pagedPrograms.map((p) => (
+                  <tr key={p.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-mono font-bold text-blue-700">{p.code}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">{p.name}</td>
+                    <td className="px-4 py-3">{p.department?.name || 'Department'}</td>
+                    <td className="px-4 py-3">{p.degreeType}</td>
+                    <td className="px-4 py-3">{p.durationYears} Years</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditProg(p)}
+                          title="Edit Program"
+                          className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteProg(p)}
+                          title="Delete Program"
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Degree Programs Pagination */}
+        <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+          <div className="flex items-center gap-2">
+            <span>Rows per page:</span>
+            <select
+              value={progLimit}
+              onChange={(e) => {
+                setProgLimit(Number(e.target.value));
+                setProgPage(1);
+              }}
+              className="px-2 py-1 rounded border border-slate-300 bg-white font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+            </select>
+            <span className="text-slate-400">|</span>
+            <span>
+              Showing {programs.length === 0 ? 0 : (progPage - 1) * progLimit + 1}–
+              {Math.min(progPage * progLimit, programs.length)} of{' '}
+              <strong className="text-slate-900 font-bold">{programs.length}</strong> programs
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={progPage <= 1}
+              onClick={() => setProgPage((p) => Math.max(1, p - 1))}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Prev
+            </button>
+            <span className="px-2 font-semibold text-slate-700">
+              Page {progPage} of {totalProgPages}
+            </span>
+            <button
+              type="button"
+              disabled={progPage >= totalProgPages}
+              onClick={() => setProgPage((p) => Math.min(totalProgPages, p + 1))}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
 
+      {/* Modal: Create Department */}
       <ModalDialog isOpen={deptOpen} onClose={() => setDeptOpen(false)} title="Create Academic Department">
-        <form onSubmit={handleCreateDept} className="space-y-3 text-xs">
+        <form onSubmit={handleCreateDept} className="space-y-3.5 text-xs">
           <div>
-            <label className="block font-semibold mb-1">Department Code</label>
+            <label className="block font-semibold mb-1 text-slate-700">Department Code</label>
             <input
               required
               value={deptForm.code}
-              onChange={(e) => setDeptForm({ ...deptForm, code: e.target.value })}
+              onChange={(e) => setDeptForm({ ...deptForm, code: e.target.value.toUpperCase() })}
               placeholder="DEPT-AI"
-              className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 uppercase font-mono"
             />
           </div>
           <div>
-            <label className="block font-semibold mb-1">Department Name</label>
+            <label className="block font-semibold mb-1 text-slate-700">Department Name</label>
             <input
               required
               value={deptForm.name}
@@ -286,7 +494,7 @@ export function DepartmentsAndProgramsPage() {
             />
           </div>
           <div>
-            <label className="block font-semibold mb-1">Department Head</label>
+            <label className="block font-semibold mb-1 text-slate-700">Department Head</label>
             <input
               value={deptForm.headName}
               onChange={(e) => setDeptForm({ ...deptForm, headName: e.target.value })}
@@ -294,38 +502,153 @@ export function DepartmentsAndProgramsPage() {
               className="w-full px-3 py-2 rounded-lg border border-slate-300"
             />
           </div>
-          <button type="submit" className="w-full py-2 bg-blue-600 text-white font-semibold rounded-lg">
-            Save Department
-          </button>
+          <div>
+            <label className="block font-semibold mb-1 text-slate-700">Description</label>
+            <textarea
+              rows={2}
+              value={deptForm.description}
+              onChange={(e) => setDeptForm({ ...deptForm, description: e.target.value })}
+              placeholder="Academic department mandate and faculty specializations..."
+              className="w-full px-3 py-2 rounded-lg border border-slate-300"
+            />
+          </div>
+          <div className="pt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setDeptOpen(false)}
+              className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold"
+            >
+              Cancel
+            </button>
+            <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">
+              Save Department
+            </button>
+          </div>
         </form>
       </ModalDialog>
 
-      <ModalDialog isOpen={progOpen} onClose={() => setProgOpen(false)} title="Create Academic Program">
-        <form onSubmit={handleCreateProg} className="space-y-3 text-xs">
+      {/* Modal: Edit Department */}
+      <ModalDialog
+        isOpen={editDeptOpen}
+        onClose={() => {
+          setEditDeptOpen(false);
+          setEditingDept(null);
+        }}
+        title={`Edit Department: ${editingDept?.code || ''}`}
+      >
+        {editingDept && (
+          <form onSubmit={handleSaveEditDept} className="space-y-3.5 text-xs">
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Department Code</label>
+              <input
+                required
+                value={editDeptForm.code}
+                onChange={(e) => setEditDeptForm({ ...editDeptForm, code: e.target.value.toUpperCase() })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 uppercase font-mono"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Department Name</label>
+              <input
+                required
+                value={editDeptForm.name}
+                onChange={(e) => setEditDeptForm({ ...editDeptForm, name: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold mb-1 text-slate-700">Department Head</label>
+                <input
+                  value={editDeptForm.headName}
+                  onChange={(e) => setEditDeptForm({ ...editDeptForm, headName: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1 text-slate-700">Status</label>
+                <select
+                  value={editDeptForm.status}
+                  onChange={(e) => setEditDeptForm({ ...editDeptForm, status: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+                >
+                  <option value="active">Active</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Description</label>
+              <textarea
+                rows={2}
+                value={editDeptForm.description}
+                onChange={(e) => setEditDeptForm({ ...editDeptForm, description: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditDeptOpen(false);
+                  setEditingDept(null);
+                }}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold"
+              >
+                Cancel
+              </button>
+              <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">
+                Update Department
+              </button>
+            </div>
+          </form>
+        )}
+      </ModalDialog>
+
+      {/* Modal: Create Program */}
+      <ModalDialog isOpen={progOpen} onClose={() => setProgOpen(false)} title="Create Academic Degree Program">
+        <form onSubmit={handleCreateProg} className="space-y-3.5 text-xs">
           <div>
-            <label className="block font-semibold mb-1">Department</label>
+            <label className="block font-semibold mb-1 text-slate-700">Department</label>
             <select
               value={progForm.departmentId}
               onChange={(e) => setProgForm({ ...progForm, departmentId: Number(e.target.value) })}
               className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
             >
               {departments.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
+                <option key={d.id} value={d.id}>
+                  {d.code} - {d.name}
+                </option>
               ))}
             </select>
           </div>
-          <div>
-            <label className="block font-semibold mb-1">Program Code</label>
-            <input
-              required
-              value={progForm.code}
-              onChange={(e) => setProgForm({ ...progForm, code: e.target.value })}
-              placeholder="BSAI"
-              className="w-full px-3 py-2 rounded-lg border border-slate-300"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Program Code</label>
+              <input
+                required
+                value={progForm.code}
+                onChange={(e) => setProgForm({ ...progForm, code: e.target.value.toUpperCase() })}
+                placeholder="BSAI"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 uppercase font-mono"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Degree Type</label>
+              <select
+                value={progForm.degreeType}
+                onChange={(e) => setProgForm({ ...progForm, degreeType: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="Associate">Associate (2 Years)</option>
+                <option value="Bachelor">Bachelor (4 Years)</option>
+                <option value="Master">Master (2 Years)</option>
+                <option value="Doctorate">Doctorate (3–5 Years)</option>
+              </select>
+            </div>
           </div>
           <div>
-            <label className="block font-semibold mb-1">Program Name</label>
+            <label className="block font-semibold mb-1 text-slate-700">Program Name</label>
             <input
               required
               value={progForm.name}
@@ -334,10 +657,118 @@ export function DepartmentsAndProgramsPage() {
               className="w-full px-3 py-2 rounded-lg border border-slate-300"
             />
           </div>
-          <button type="submit" className="w-full py-2 bg-blue-600 text-white font-semibold rounded-lg">
-            Save Program
-          </button>
+          <div>
+            <label className="block font-semibold mb-1 text-slate-700">Program Duration (Years)</label>
+            <input
+              type="number"
+              min={1}
+              max={6}
+              value={progForm.durationYears}
+              onChange={(e) => setProgForm({ ...progForm, durationYears: Number(e.target.value) })}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300"
+            />
+          </div>
+          <div className="pt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setProgOpen(false)}
+              className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold"
+            >
+              Cancel
+            </button>
+            <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">
+              Save Program
+            </button>
+          </div>
         </form>
+      </ModalDialog>
+
+      {/* Modal: Edit Program */}
+      <ModalDialog
+        isOpen={editProgOpen}
+        onClose={() => {
+          setEditProgOpen(false);
+          setEditingProg(null);
+        }}
+        title={`Edit Program: ${editingProg?.code || ''}`}
+      >
+        {editingProg && (
+          <form onSubmit={handleSaveEditProg} className="space-y-3.5 text-xs">
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Department</label>
+              <select
+                value={editProgForm.departmentId}
+                onChange={(e) => setEditProgForm({ ...editProgForm, departmentId: Number(e.target.value) })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.code} - {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold mb-1 text-slate-700">Program Code</label>
+                <input
+                  required
+                  value={editProgForm.code}
+                  onChange={(e) => setEditProgForm({ ...editProgForm, code: e.target.value.toUpperCase() })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 uppercase font-mono"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1 text-slate-700">Degree Type</label>
+                <select
+                  value={editProgForm.degreeType}
+                  onChange={(e) => setEditProgForm({ ...editProgForm, degreeType: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+                >
+                  <option value="Associate">Associate (2 Years)</option>
+                  <option value="Bachelor">Bachelor (4 Years)</option>
+                  <option value="Master">Master (2 Years)</option>
+                  <option value="Doctorate">Doctorate (3–5 Years)</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Program Name</label>
+              <input
+                required
+                value={editProgForm.name}
+                onChange={(e) => setEditProgForm({ ...editProgForm, name: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Program Duration (Years)</label>
+              <input
+                type="number"
+                min={1}
+                max={6}
+                value={editProgForm.durationYears}
+                onChange={(e) => setEditProgForm({ ...editProgForm, durationYears: Number(e.target.value) })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditProgOpen(false);
+                  setEditingProg(null);
+                }}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold"
+              >
+                Cancel
+              </button>
+              <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">
+                Update Program
+              </button>
+            </div>
+          </form>
+        )}
       </ModalDialog>
     </div>
   );

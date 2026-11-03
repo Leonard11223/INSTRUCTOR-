@@ -43,7 +43,8 @@ import {
   InstructorAssignmentsPage,
   InstructorSubmissionsPage,
   InstructorAssessmentsPage,
-  InstructorGradebookPage
+  InstructorGradebookPage,
+  InstructorClassManagementPage
 } from './pages/InstructorPages';
 
 import {
@@ -281,7 +282,7 @@ export default function App() {
           path="/instructor/classes"
           element={
             <ProtectedRoute allowedRoles={['instructor']}>
-              <ClassesAndSectionsPage />
+              <InstructorClassManagementPage />
             </ProtectedRoute>
           }
         />

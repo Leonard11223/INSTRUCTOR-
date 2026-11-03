@@ -1,6 +1,6 @@
-# Aetheria Institute & Networking Academy — Next-Generation Role-Based LMS
+# Mindoro State University (MinSU) E-Learn & Networking Academy — Role-Based LMS
 
-A complete, production-quality, full-stack Role-Based Learning Management System (LMS) inspired by the educational workflows and laboratory experience of Cisco Networking Academy (NetAcad).
+A complete, production-quality, full-stack Role-Based Learning Management System (LMS) implemented for **Mindoro State University (MinSU)**, inspired by the educational workflows and laboratory experience of Cisco Networking Academy (NetAcad).
 
 ---
 
@@ -104,6 +104,11 @@ npm run build
 
 ## 6. Complete Documentation Suite
 
+- [**Unified System Modeling & 17-Diagram Architecture Blueprint (`OVERALL_SYSTEM_MODELING_DIAGRAMS.md`)**](file:///c:/Users/Ryan/Desktop/LMS/OVERALL_SYSTEM_MODELING_DIAGRAMS.md) — Comprehensive master blueprint containing all 8 Structural (A1–A8) and all 9 Behavioral (B1–B9) diagrams with Mermaid code and copy-paste AI prompts covering all 5 user roles.
+- [**SuperAdmin Modeling Blueprint (`SUPERADMIN_SYSTEM_MODELING_DIAGRAMS.md`)**](file:///c:/Users/Ryan/Desktop/LMS/SUPERADMIN_SYSTEM_MODELING_DIAGRAMS.md) — Dedicated 17-diagram specification for the MinSU Super Administrator role.
+- [**Student Modeling Blueprint (`STUDENT_SYSTEM_MODELING_DIAGRAMS.md`)**](file:///c:/Users/Ryan/Desktop/LMS/STUDENT_SYSTEM_MODELING_DIAGRAMS.md) — Dedicated 17-diagram specification for the MinSU Student / Learner role.
+- [**Academic Admin Modeling Blueprint (`ACADEMIC_ADMIN_SYSTEM_MODELING_DIAGRAMS.md`)**](file:///c:/Users/Ryan/Desktop/LMS/ACADEMIC_ADMIN_SYSTEM_MODELING_DIAGRAMS.md) — Dedicated 17-diagram specification for the MinSU Academic Administrator role.
+- [**Instructor Modeling Blueprint (`INSTRUCTOR_SYSTEM_MODELING_DIAGRAMS.md`)**](file:///c:/Users/Ryan/Desktop/LMS/INSTRUCTOR_SYSTEM_MODELING_DIAGRAMS.md) — Dedicated 17-diagram specification for the MinSU Instructor / Faculty role.
 - [**User Manual (`docs/USER_MANUAL.md`)**](file:///c:/Users/Ryan/Desktop/LMS/docs/USER_MANUAL.md) — 12-chapter beginner-friendly manual for all five roles.
 - [**API Documentation (`docs/API_DOCUMENTATION.md`)**](file:///c:/Users/Ryan/Desktop/LMS/docs/API_DOCUMENTATION.md) — Complete REST endpoint reference (`/api/v1` & `/api`), permissions, and response formats.
 - [**Page-by-Page Test Matrix (`docs/PAGE_TEST_MATRIX.md`)**](file:///c:/Users/Ryan/Desktop/LMS/docs/PAGE_TEST_MATRIX.md) — Complete test inventory for all 45+ routes and views.

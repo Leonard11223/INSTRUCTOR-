@@ -377,13 +377,92 @@ async function markNotificationRead(req, res, next) {
   }
 }
 
+// ============================================================================
+// UPDATE & DELETE — ANNOUNCEMENTS
+// ============================================================================
+
+async function updateAnnouncement(req, res, next) {
+  try {
+    const announcement = await Announcement.findByPk(Number(req.params.id));
+    if (!announcement) throw new AppError('Announcement not found.', 404);
+
+    // Only the author or an admin can edit
+    if (announcement.authorId !== req.user.id &&
+        !req.user.roles.includes('super_admin') &&
+        !req.user.roles.includes('academic_admin')) {
+      throw new AppError('Forbidden: You can only edit your own announcements.', 403);
+    }
+
+    if (announcement.classId) {
+      await verifyClassAccess(req.user, announcement.classId, { allowAdmin: true, allowInstructor: true });
+    }
+
+    const allowed = ['title', 'content', 'priority', 'isPinned', 'expiresAt', 'scope'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) {
+        updates[key] = key === 'title' || key === 'content'
+          ? sanitizePlainText(req.body[key])
+          : req.body[key];
+      }
+    }
+
+    await announcement.update(updates);
+    return res.status(200).json({ success: true, message: 'Announcement updated.', data: { announcement } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function deleteAnnouncement(req, res, next) {
+  try {
+    const announcement = await Announcement.findByPk(Number(req.params.id));
+    if (!announcement) throw new AppError('Announcement not found.', 404);
+
+    if (announcement.authorId !== req.user.id &&
+        !req.user.roles.includes('super_admin') &&
+        !req.user.roles.includes('academic_admin')) {
+      throw new AppError('Forbidden: You can only delete your own announcements.', 403);
+    }
+
+    await announcement.destroy();
+    return res.status(200).json({ success: true, message: 'Announcement deleted.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// ============================================================================
+// DELETE — DISCUSSION THREADS
+// ============================================================================
+
+async function deleteDiscussionThread(req, res, next) {
+  try {
+    const thread = await DiscussionThread.findByPk(Number(req.params.threadId));
+    if (!thread) throw new AppError('Discussion thread not found.', 404);
+
+    // Only the author, instructor of the class, or admin can delete
+    if (thread.authorId !== req.user.id) {
+      await verifyClassAccess(req.user, thread.classId, { allowAdmin: true, allowInstructor: true });
+    }
+
+    await thread.destroy();
+    return res.status(200).json({ success: true, message: 'Discussion thread deleted.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   listAnnouncements,
   createAnnouncement,
+  updateAnnouncement,
+  deleteAnnouncement,
   listDiscussions,
   createDiscussionThread,
   replyToDiscussionThread,
   escalateOrResolveDiscussion,
+  deleteDiscussionThread,
   listConversations,
   startOrSendMessage,
   listNotifications,

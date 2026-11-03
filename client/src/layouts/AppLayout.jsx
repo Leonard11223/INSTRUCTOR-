@@ -330,10 +330,10 @@ export default function AppLayout() {
           </div>
           <div>
             <span className="font-bold text-base tracking-tight text-white block leading-none">
-              Aetheria NetAcad
+              MinSU NetAcad
             </span>
             <span className="text-[11px] text-blue-400 font-medium">
-              Institutional Learning Hub
+              Mindoro State University
             </span>
           </div>
         </div>
@@ -385,7 +385,7 @@ export default function AppLayout() {
           />
           <aside className="relative w-64 max-w-xs bg-slate-900 text-white flex flex-col h-full z-10">
             <div className="flex items-center justify-between px-4 h-16 border-b border-slate-800">
-              <span className="font-bold text-base">Aetheria NetAcad</span>
+              <span className="font-bold text-base">MinSU NetAcad</span>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}
@@ -418,7 +418,7 @@ export default function AppLayout() {
 
             {/* Breadcrumbs */}
             <nav aria-label="Breadcrumb" className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-500">
-              <span className="text-slate-900 font-semibold">Aetheria LMS</span>
+              <span className="text-slate-900 font-semibold">MinSU LMS</span>
               {pathSegments.map((seg, idx) => (
                 <React.Fragment key={idx}>
                   <ChevronRight className="w-3.5 h-3.5 text-slate-400" />

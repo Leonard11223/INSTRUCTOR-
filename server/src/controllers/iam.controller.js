@@ -196,8 +196,18 @@ async function updateUser(req, res, next) {
       }
     }
 
-    // Protect the final active Super Administrator against accidental deactivation or role removal
+    // Protect Super Administrator accounts against demotion or role removal
     const isTargetSuperAdmin = (user.roles || []).some((r) => r.slug === 'super_admin');
+    
+    // Security policy: The Super Administrator system role is locked and cannot be demoted or changed
+    if (isTargetSuperAdmin && payload.roleSlug && payload.roleSlug !== 'super_admin') {
+      throw new AppError(
+        'The Super Administrator system role is permanently locked and cannot be demoted or changed for security purposes.',
+        400,
+        'SUPER_ADMIN_ROLE_LOCKED'
+      );
+    }
+
     const isRemovingSuperAdmin =
       isTargetSuperAdmin &&
       ((payload.status && payload.status !== 'active') ||
@@ -408,7 +418,7 @@ async function updateSystemSetting(req, res, next) {
 
 async function listAuditLogs(req, res, next) {
   try {
-    const { category, severity, search, limit = 100 } = req.query;
+    const { category, severity, search, page = 1, limit = 50 } = req.query;
     const where = {};
     if (category) where.category = category;
     if (severity) where.severity = severity;
@@ -420,17 +430,102 @@ async function listAuditLogs(req, res, next) {
       ];
     }
 
-    const logs = await AuditLog.findAll({
+    const offset = (Math.max(1, Number(page)) - 1) * Number(limit);
+    const { rows, count } = await AuditLog.findAndCountAll({
       where,
       order: [['createdAt', 'DESC'], ['id', 'DESC']],
-      limit: Math.min(500, Number(limit))
+      limit: Number(limit),
+      offset
     });
 
     return res.status(200).json({
       success: true,
-      data: { logs }
+      data: {
+        logs: rows,
+        pagination: {
+          total: count,
+          page: Number(page),
+          limit: Number(limit),
+          totalPages: Math.ceil(count / Number(limit)) || 1
+        }
+      }
     });
   } catch (err) {
+    return next(err);
+  }
+}
+
+async function deleteUser(req, res, next) {
+  const t = await sequelize.transaction();
+  try {
+    const targetUserId = Number(req.params.id);
+    const user = await User.findByPk(targetUserId, {
+      include: [{ model: Role, as: 'roles' }],
+      transaction: t
+    });
+
+    if (!user) {
+      throw new AppError('User not found.', 404, 'USER_NOT_FOUND');
+    }
+
+    if (targetUserId === req.user.id) {
+      throw new AppError('You cannot delete your own logged-in administrator account.', 400, 'SELF_DELETION_FORBIDDEN');
+    }
+
+    const isTargetSuperAdmin = (user.roles || []).some((r) => r.slug === 'super_admin');
+    if (isTargetSuperAdmin) {
+      throw new AppError(
+        'The Super Administrator account is permanently protected and cannot be deleted for security purposes.',
+        400,
+        'SUPER_ADMIN_DELETION_FORBIDDEN'
+      );
+    }
+
+    // Check if user has active enrollments or instructor assignments
+    const [enrollmentsCount, assignmentsCount] = await Promise.all([
+      ClassMembership.count({ where: { userId: user.id }, transaction: t }),
+      InstructorAssignment.count({ where: { instructorId: user.id }, transaction: t })
+    ]);
+
+    if (enrollmentsCount > 0 || assignmentsCount > 0) {
+      // If referenced in active academic records, mark inactive rather than hard-delete to preserve data integrity
+      await user.update({ status: 'inactive' }, { transaction: t });
+      await t.commit();
+      await recordAudit({
+        req,
+        action: 'USER_ACCOUNT_DEACTIVATED',
+        category: 'user',
+        severity: 'warning',
+        entityType: 'User',
+        entityId: user.id,
+        metadata: { reason: 'User has academic records; archived as inactive.' }
+      });
+      return res.status(200).json({
+        success: true,
+        message: `User account "${user.email}" has active academic history and has been archived as inactive.`
+      });
+    }
+
+    await UserRole.destroy({ where: { userId: user.id }, transaction: t });
+    await user.destroy({ transaction: t });
+    await t.commit();
+
+    await recordAudit({
+      req,
+      action: 'USER_ACCOUNT_DELETED',
+      category: 'user',
+      severity: 'warning',
+      entityType: 'User',
+      entityId: targetUserId,
+      metadata: { email: user.email }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `User account "${user.email}" was deleted successfully.`
+    });
+  } catch (err) {
+    await t.rollback();
     return next(err);
   }
 }
@@ -440,6 +535,7 @@ module.exports = {
   getUserById,
   createUser,
   updateUser,
+  deleteUser,
   listRolesAndPermissions,
   updateRolePermissions,
   listSystemSettings,

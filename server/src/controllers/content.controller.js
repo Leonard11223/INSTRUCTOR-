@@ -340,14 +340,43 @@ async function getProgressAnalytics(req, res, next) {
   }
 }
 
+// ============================================================================
+// DELETE — MODULES & LESSONS
+// ============================================================================
+
+async function deleteModule(req, res, next) {
+  try {
+    const mod = await Module.findByPk(Number(req.params.id));
+    if (!mod) throw new AppError('Module not found.', 404);
+    // Soft-delete by archiving
+    await mod.update({ publicationStatus: 'archived' });
+    return res.status(200).json({ success: true, message: 'Module archived.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function deleteLesson(req, res, next) {
+  try {
+    const lesson = await Lesson.findByPk(Number(req.params.id));
+    if (!lesson) throw new AppError('Lesson not found.', 404);
+    await lesson.update({ publicationStatus: 'archived' });
+    return res.status(200).json({ success: true, message: 'Lesson archived.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   listModules,
   createModule,
   updateModule,
   reorderModules,
+  deleteModule,
   getLessonById,
   createLesson,
   updateLesson,
+  deleteLesson,
   listResources,
   createResource,
   downloadResourceFile,
