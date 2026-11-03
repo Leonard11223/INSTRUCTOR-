@@ -76,10 +76,10 @@ export function LoginPage() {
           </div>
           <div>
             <span className="font-bold text-lg tracking-tight block">
-              Aetheria Institute & Networking Academy
+              Mindoro State University (MinSU)
             </span>
             <span className="text-xs text-blue-300">
-              Next-Generation Role-Based Learning Management System
+              E-Learn & Networking Academy — Role-Based LMS
             </span>
           </div>
         </div>
@@ -668,8 +668,8 @@ function PublicNavbar() {
             <Terminal className="w-5 h-5 text-white" />
           </div>
           <div>
-            <span className="font-bold text-sm block">Aetheria Institute & Networking Academy</span>
-            <span className="text-[11px] text-blue-300">Role-Based Learning Management System</span>
+            <span className="font-bold text-sm block">Mindoro State University (MinSU)</span>
+            <span className="text-[11px] text-blue-300">E-Learn & Networking Academy LMS</span>
           </div>
         </Link>
         <nav className="flex flex-wrap items-center gap-4 text-xs font-semibold">
@@ -701,7 +701,7 @@ export function LandingPage() {
             Structured Curriculum Delivery, Technical Laboratories, Timed Examinations & Auditable Grading.
           </h1>
           <p className="text-slate-300 text-sm sm:text-base mt-4 max-w-2xl leading-relaxed">
-            Inspired by Cisco Networking Academy workflows, Aetheria Academy LMS unifies institutional governance, modular course authoring, guided networking & cybersecurity labs, and verifiable completion certificates across five distinct academic roles.
+            Implemented for Mindoro State University (MinSU) and inspired by Cisco Networking Academy workflows, the MinSU LMS unifies institutional governance, modular course authoring, guided networking & cybersecurity labs, and verifiable completion certificates across five distinct academic roles.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
@@ -757,12 +757,12 @@ export function AboutPage() {
       <main className="flex-1 max-w-4xl w-full mx-auto px-6 py-10 space-y-6">
         <PageHeader
           badge="Institutional Overview"
-          title="About Aetheria Institute & Networking Academy LMS"
+          title="About Mindoro State University (MinSU) LMS"
           subtitle="Architecture, role separation, and educational workflow principles."
         />
         <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4 text-sm text-slate-700 leading-relaxed">
           <p>
-            Aetheria Institute & Networking Academy LMS is a full-stack Role-Based Learning Management System designed for higher education institutions, universities, and technical academies.
+            Mindoro State University (MinSU) E-Learn & Networking Academy LMS is a full-stack Role-Based Learning Management System designed for MinSU campuses, colleges, faculty, and students.
           </p>
           <h3 className="text-base font-bold text-slate-900 pt-2">Role Separation & Academic Governance</h3>
           <ul className="list-disc pl-5 space-y-1.5 text-xs">

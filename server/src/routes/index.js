@@ -55,6 +55,7 @@ router.get('/users', requireAuth, requirePermission('users:read'), iamCtrl.listU
 router.get('/users/:id', requireAuth, requirePermission('users:read'), iamCtrl.getUserById);
 router.post('/users', requireAuth, requirePermission('users:write'), iamCtrl.createUser);
 router.put('/users/:id', requireAuth, requirePermission('users:write'), iamCtrl.updateUser);
+router.delete('/users/:id', requireAuth, requireRole('super_admin'), iamCtrl.deleteUser);
 
 router.get('/roles', requireAuth, iamCtrl.listRolesAndPermissions);
 router.put('/roles/:id/permissions', requireAuth, requirePermission('roles:manage'), iamCtrl.updateRolePermissions);
@@ -77,6 +78,7 @@ router.delete('/departments/:id', requireAuth, requirePermission('departments:ma
 router.get('/programs', requireAuth, acadCtrl.listPrograms);
 router.post('/programs', requireAuth, requirePermission('programs:manage'), acadCtrl.createProgram);
 router.put('/programs/:id', requireAuth, requirePermission('programs:manage'), acadCtrl.updateProgram);
+router.delete('/programs/:id', requireAuth, requirePermission('programs:manage'), acadCtrl.deleteProgram);
 
 router.get('/academic-years', requireAuth, acadCtrl.listAcademicYears);
 router.post('/academic-years', requireAuth, requirePermission('terms:manage'), acadCtrl.createAcademicYear);

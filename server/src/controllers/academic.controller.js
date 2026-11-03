@@ -204,7 +204,51 @@ async function updateProgram(req, res, next) {
     const program = await Program.findByPk(req.params.id);
     if (!program) throw new AppError('Program not found.', 404);
     await program.update(req.body);
+    await recordAudit({
+      req,
+      action: 'PROGRAM_UPDATED',
+      category: 'academic',
+      entityType: 'Program',
+      entityId: program.id,
+      metadata: req.body
+    });
     return res.status(200).json({ success: true, message: 'Program updated.', data: { program } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function deleteProgram(req, res, next) {
+  try {
+    const program = await Program.findByPk(req.params.id);
+    if (!program) throw new AppError('Program not found.', 404, 'PROGRAM_NOT_FOUND');
+
+    const [coursesCount, usersCount] = await Promise.all([
+      Course.count({ where: { programId: program.id } }),
+      User.count({ where: { programId: program.id } })
+    ]);
+
+    if (coursesCount > 0 || usersCount > 0) {
+      throw new AppError(
+        `Cannot delete degree program "${program.code}" because it is referenced by ${coursesCount} course(s) and ${usersCount} enrolled student(s).`,
+        409,
+        'REFERENCED_RECORD_PROTECTED'
+      );
+    }
+
+    await program.destroy();
+    await recordAudit({
+      req,
+      action: 'PROGRAM_DELETED',
+      category: 'academic',
+      entityType: 'Program',
+      entityId: program.id
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Academic program deleted successfully.'
+    });
   } catch (err) {
     return next(err);
   }
@@ -947,6 +991,7 @@ module.exports = {
   listPrograms,
   createProgram,
   updateProgram,
+  deleteProgram,
   listAcademicYears,
   createAcademicYear,
   listSemesters,

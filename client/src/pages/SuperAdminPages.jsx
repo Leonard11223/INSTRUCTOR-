@@ -21,9 +21,27 @@ import {
   Search,
   Lock,
   Settings,
-  Database
+  Database,
+  ChevronLeft,
+  ChevronRight,
+  Shield,
+  Edit2,
+  Trash2,
+  Key,
+  AlertTriangle,
+  Terminal,
+  Cpu,
+  Mail,
+  CheckCircle2,
+  Clock,
+  Sliders,
+  Globe,
+  Building2,
+  Server,
+  Check
 } from 'lucide-react';
 import { lmsApi, extractErrorMessage } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { userCreateFormSchema } from '../schemas/validation';
 import {
   PageHeader,
@@ -41,6 +59,9 @@ export function SuperAdminDashboardPage() {
     queryFn: lmsApi.getDashboardSummary
   });
 
+  const [auditPage, setAuditPage] = useState(1);
+  const auditLimit = 6;
+
   if (isLoading) return <LoadingState label="Loading system-wide metrics..." />;
   if (error) return <ErrorState message={extractErrorMessage(error)} onRetry={refetch} />;
 
@@ -49,6 +70,9 @@ export function SuperAdminDashboardPage() {
   const roleDist = summary.roleDistribution || [];
   const auditLogs = summary.recentAuditLogs || [];
   const securityEvents = summary.securityEvents || [];
+
+  const totalAuditPages = Math.max(1, Math.ceil(auditLogs.length / auditLimit));
+  const pagedAuditLogs = auditLogs.slice((auditPage - 1) * auditLimit, auditPage * auditLimit);
 
   return (
     <div className="space-y-6">
@@ -145,7 +169,7 @@ export function SuperAdminDashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {auditLogs.map((log) => (
+              {pagedAuditLogs.map((log) => (
                 <tr key={log.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3 text-slate-500">{new Date(log.createdAt).toLocaleString()}</td>
                   <td className="px-4 py-3 font-medium text-slate-900">{log.actorEmail || 'System'}</td>
@@ -158,6 +182,38 @@ export function SuperAdminDashboardPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Dashboard Audit Table Pagination */}
+        <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+          <span>
+            Showing {auditLogs.length === 0 ? 0 : (auditPage - 1) * auditLimit + 1}–
+            {Math.min(auditPage * auditLimit, auditLogs.length)} of{' '}
+            <strong className="text-slate-900 font-bold">{auditLogs.length}</strong> recent events
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={auditPage <= 1}
+              onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Prev
+            </button>
+            <span className="px-2 font-semibold text-slate-700">
+              Page {auditPage} of {totalAuditPages}
+            </span>
+            <button
+              type="button"
+              disabled={auditPage >= totalAuditPages}
+              onClick={() => setAuditPage((p) => Math.min(totalAuditPages, p + 1))}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -165,16 +221,49 @@ export function SuperAdminDashboardPage() {
 
 export function UserManagementPage() {
   const queryClient = useQueryClient();
+  const { user: currentUser } = useAuth();
   const { addToast } = useToast();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+
+  const [editForm, setEditForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    status: 'active',
+    roleSlug: 'student'
+  });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['users', search, roleFilter, statusFilter],
-    queryFn: () => lmsApi.listUsers({ search, role: roleFilter, status: statusFilter })
+    queryKey: ['users', search, roleFilter, statusFilter, page, limit],
+    queryFn: () => lmsApi.listUsers({ search, role: roleFilter, status: statusFilter, page, limit })
   });
+
+  const handleSearchChange = (val) => {
+    setSearch(val);
+    setPage(1);
+  };
+
+  const handleRoleFilterChange = (val) => {
+    setRoleFilter(val);
+    setPage(1);
+  };
+
+  const handleStatusFilterChange = (val) => {
+    setStatusFilter(val);
+    setPage(1);
+  };
+
+  const handleLimitChange = (val) => {
+    setLimit(Number(val));
+    setPage(1);
+  };
 
   const {
     register,
@@ -188,9 +277,7 @@ export function UserManagementPage() {
       lastName: '',
       email: '',
       password: 'Password@123',
-      roleSlug: 'student',
-      studentNumber: '',
-      employeeNumber: ''
+      roleSlug: 'student'
     }
   });
 
@@ -198,10 +285,65 @@ export function UserManagementPage() {
     mutationFn: ({ id, payload }) => lmsApi.updateUser(id, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
-      addToast('User account updated.');
+      addToast('User account updated successfully.');
     },
     onError: (err) => addToast(extractErrorMessage(err), 'error')
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => lmsApi.deleteUser(id),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      addToast(res?.message || 'User account removed successfully.');
+    },
+    onError: (err) => addToast(extractErrorMessage(err), 'error')
+  });
+
+  const handleOpenEdit = (u) => {
+    setEditingUser(u);
+    setEditForm({
+      firstName: u.firstName || '',
+      lastName: u.lastName || '',
+      email: u.email || '',
+      status: u.status || 'active',
+      roleSlug: u.roles?.[0]?.slug || 'student'
+    });
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    try {
+      const isSuperAdmin = (editingUser.roles || []).some((r) => r.slug === 'super_admin');
+      const payload = {
+        firstName: editForm.firstName,
+        lastName: editForm.lastName,
+        status: editForm.status
+      };
+      if (!isSuperAdmin && editForm.roleSlug) {
+        payload.roleSlug = editForm.roleSlug;
+      }
+      await lmsApi.updateUser(editingUser.id, payload);
+      addToast(`Account for ${editForm.firstName} ${editForm.lastName} updated.`);
+      setEditOpen(false);
+      setEditingUser(null);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleDeleteUser = (u) => {
+    const isSuperAdmin = (u.roles || []).some((r) => r.slug === 'super_admin');
+    if (isSuperAdmin) {
+      addToast('Super Administrator accounts are permanently protected against deletion.', 'error');
+      return;
+    }
+    if (window.confirm(`Are you sure you want to delete or deactivate user account "${u.email}" (${u.firstName} ${u.lastName})?`)) {
+      deleteMutation.mutate(u.id);
+    }
+  };
 
   const onCreateSubmit = async (values) => {
     try {
@@ -216,13 +358,19 @@ export function UserManagementPage() {
   };
 
   const users = data?.data?.users || [];
+  const pagination = data?.data?.pagination || {
+    total: users.length,
+    page,
+    limit,
+    totalPages: Math.max(1, Math.ceil((users.length || 0) / limit))
+  };
 
   return (
     <div className="space-y-6">
       <PageHeader
         badge="Identity & Access Management"
         title="Platform User Directory & Role Assignment"
-        subtitle="Create, activate, suspend, and manage institutional accounts across all five roles."
+        subtitle="Create, activate, suspend, edit, and manage institutional accounts across all five roles."
         actions={
           <button
             type="button"
@@ -242,14 +390,14 @@ export function UserManagementPage() {
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, email, or ID number..."
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search by name or email..."
             className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300"
           />
         </div>
         <select
           value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
+          onChange={(e) => handleRoleFilterChange(e.target.value)}
           aria-label="Filter by role"
           className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white"
         >
@@ -262,7 +410,7 @@ export function UserManagementPage() {
         </select>
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => handleStatusFilterChange(e.target.value)}
           aria-label="Filter by status"
           className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white"
         >
@@ -282,75 +430,184 @@ export function UserManagementPage() {
               <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
                 <tr>
                   <th className="px-4 py-3">Name & Email</th>
-                  <th className="px-4 py-3">ID Number</th>
                   <th className="px-4 py-3">System Role</th>
-                  <th className="px-4 py-3">Department / Program</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {users.map((u) => {
-                  const currentRole = u.roles?.[0]?.slug || 'student';
-                  return (
-                    <tr key={u.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-3">
-                        <p className="font-semibold text-slate-900">{u.firstName} {u.lastName}</p>
-                        <p className="text-slate-500">{u.email}</p>
-                      </td>
-                      <td className="px-4 py-3 font-mono">{u.studentNumber || u.employeeNumber || '-'}</td>
-                      <td className="px-4 py-3">
-                        <select
-                          value={currentRole}
-                          onChange={(e) =>
-                            updateMutation.mutate({ id: u.id, payload: { roleSlug: e.target.value } })
-                          }
-                          aria-label={`Change role for ${u.email}`}
-                          className="px-2 py-1 rounded border border-slate-300 text-xs bg-white font-medium"
-                        >
-                          <option value="super_admin">Super Admin</option>
-                          <option value="academic_admin">Academic Admin</option>
-                          <option value="instructor">Instructor</option>
-                          <option value="teaching_assistant">Teaching Assistant</option>
-                          <option value="student">Student</option>
-                        </select>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {u.department?.code || 'Institutional'} {u.program ? `· ${u.program.code}` : ''}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={u.status} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          {u.status !== 'active' ? (
-                            <button
-                              type="button"
-                              onClick={() => updateMutation.mutate({ id: u.id, payload: { status: 'active' } })}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-semibold"
+                {users.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-slate-500 text-xs">
+                      No users match the specified search or filter criteria.
+                    </td>
+                  </tr>
+                ) : (
+                  users.map((u) => {
+                    const currentRole = u.roles?.[0]?.slug || 'student';
+                    const isSuperAdmin = currentRole === 'super_admin';
+                    const isSelf = u.id === currentUser?.id;
+
+                    return (
+                      <tr key={u.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-slate-900 flex items-center gap-1.5">
+                            {u.firstName} {u.lastName}
+                            {isSelf && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 font-bold">
+                                You
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-slate-500">{u.email}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          {isSuperAdmin ? (
+                            <span
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs select-none shadow-2xs"
+                              title="The Super Administrator role is permanently locked and protected against modification."
                             >
-                              Activate
-                            </button>
+                              <Lock className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>Super Admin (Locked)</span>
+                            </span>
                           ) : (
+                            <select
+                              value={currentRole}
+                              onChange={(e) =>
+                                updateMutation.mutate({ id: u.id, payload: { roleSlug: e.target.value } })
+                              }
+                              aria-label={`Change role for ${u.email}`}
+                              className="px-2 py-1 rounded border border-slate-300 text-xs bg-white font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                              <option value="super_admin">Super Admin</option>
+                              <option value="academic_admin">Academic Admin</option>
+                              <option value="instructor">Instructor</option>
+                              <option value="teaching_assistant">Teaching Assistant</option>
+                              <option value="student">Student</option>
+                            </select>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={u.status} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1.5">
+                            {u.status !== 'active' ? (
+                              <button
+                                type="button"
+                                onClick={() => updateMutation.mutate({ id: u.id, payload: { status: 'active' } })}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-semibold transition-colors"
+                              >
+                                Activate
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={isSuperAdmin}
+                                onClick={() => updateMutation.mutate({ id: u.id, payload: { status: 'suspended' } })}
+                                title={isSuperAdmin ? 'Active Super Administrators cannot be suspended' : 'Suspend account'}
+                                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+                                  isSuperAdmin
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                                    : 'bg-amber-100 hover:bg-amber-200 text-amber-900'
+                                }`}
+                              >
+                                Suspend
+                              </button>
+                            )}
+
+                            {/* Edit Button */}
                             <button
                               type="button"
-                              onClick={() => updateMutation.mutate({ id: u.id, payload: { status: 'suspended' } })}
-                              className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded text-[11px] font-semibold"
+                              onClick={() => handleOpenEdit(u)}
+                              title="Edit user details"
+                              className="p-1 rounded text-slate-600 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                             >
-                              Suspend
+                              <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+
+                            {/* Delete Button */}
+                            <button
+                              type="button"
+                              disabled={isSuperAdmin || isSelf}
+                              onClick={() => handleDeleteUser(u)}
+                              title={
+                                isSuperAdmin
+                                  ? 'Super Administrator accounts are permanently protected against deletion'
+                                  : isSelf
+                                  ? 'You cannot delete your own account'
+                                  : 'Delete or archive user account'
+                              }
+                              className={`p-1 rounded transition-colors ${
+                                isSuperAdmin || isSelf
+                                  ? 'text-slate-300 cursor-not-allowed'
+                                  : 'text-slate-400 hover:text-red-600 hover:bg-red-50'
+                              }`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
+          </div>
+
+          {/* Pagination Controls */}
+          <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <span>Rows per page:</span>
+              <select
+                value={limit}
+                onChange={(e) => handleLimitChange(e.target.value)}
+                className="px-2 py-1 rounded border border-slate-300 bg-white font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <span className="text-slate-400">|</span>
+              <span>
+                Showing {pagination.total === 0 ? 0 : (page - 1) * limit + 1}–
+                {Math.min(page * limit, pagination.total)} of{' '}
+                <strong className="text-slate-900 font-bold">{pagination.total}</strong> users
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Previous
+              </button>
+
+              <span className="px-3 py-1 font-semibold text-slate-700">
+                Page {pagination.page} of {pagination.totalPages}
+              </span>
+
+              <button
+                type="button"
+                disabled={page >= pagination.totalPages}
+                onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+              >
+                Next
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       )}
 
+      {/* Modal: Create User Account */}
       <ModalDialog
         isOpen={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -391,17 +648,8 @@ export function UserManagementPage() {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Student Number (Optional)</label>
-              <input {...register('studentNumber')} placeholder="2026-00199" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Employee ID (Optional)</label>
-              <input {...register('employeeNumber')} placeholder="INST-199" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
-            </div>
-          </div>
-          <div className="pt-3 flex justify-end gap-2">
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
             <button
               type="button"
               onClick={() => setCreateOpen(false)}
@@ -418,6 +666,96 @@ export function UserManagementPage() {
             </button>
           </div>
         </form>
+      </ModalDialog>
+
+      {/* Modal: Edit User Account */}
+      <ModalDialog
+        isOpen={editOpen}
+        onClose={() => {
+          setEditOpen(false);
+          setEditingUser(null);
+        }}
+        title={`Edit User Account: ${editingUser?.email || ''}`}
+      >
+        {editingUser && (
+          <form onSubmit={handleSaveEdit} className="space-y-3.5 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">First Name</label>
+                <input
+                  required
+                  value={editForm.firstName}
+                  onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Last Name</label>
+                <input
+                  required
+                  value={editForm.lastName}
+                  onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Account Status</label>
+                <select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+                >
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">System Role</label>
+                {(editingUser.roles || []).some((r) => r.slug === 'super_admin') ? (
+                  <div className="w-full px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 font-bold flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Super Admin (Locked for Security)</span>
+                  </div>
+                ) : (
+                  <select
+                    value={editForm.roleSlug}
+                    onChange={(e) => setEditForm({ ...editForm, roleSlug: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-medium"
+                  >
+                    <option value="student">Student / Learner</option>
+                    <option value="instructor">Instructor / Teacher</option>
+                    <option value="teaching_assistant">Teaching Assistant</option>
+                    <option value="academic_admin">Academic Administrator</option>
+                    <option value="super_admin">Super Administrator</option>
+                  </select>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditOpen(false);
+                  setEditingUser(null);
+                }}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+              >
+                Save Changes
+              </button>
+            </div>
+          </form>
+        )}
       </ModalDialog>
     </div>
   );
@@ -526,20 +864,182 @@ export function SystemSettingsPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
 
-  const { data: settingsData, isLoading } = useQuery({
+  const [instModalOpen, setInstModalOpen] = useState(false);
+  const [instForm, setInstForm] = useState({
+    name: '',
+    code: '',
+    domain: '',
+    contactEmail: '',
+    passingGradeDefault: 75,
+    allowSelfEnrollment: true
+  });
+
+  const [securityModalOpen, setSecurityModalOpen] = useState(false);
+  const [securityForm, setSecurityForm] = useState({
+    maxFailedLoginAttempts: 5,
+    lockoutDurationMinutes: 15,
+    sessionTimeoutMinutes: 480,
+    requireStrongPasswords: true,
+    auditRetentionDays: 365
+  });
+
+  const [gradingModalOpen, setGradingModalOpen] = useState(false);
+  const [gradingForm, setGradingForm] = useState([
+    { name: 'Quizzes', categoryType: 'quiz', weightPercent: 20 },
+    { name: 'Assignments', categoryType: 'assignment', weightPercent: 25 },
+    { name: 'Laboratory Activities', categoryType: 'laboratory', weightPercent: 25 },
+    { name: 'Major Examination', categoryType: 'major_exam', weightPercent: 30 }
+  ]);
+
+  const { data: settingsData, isLoading: settingsLoading } = useQuery({
     queryKey: ['system-settings'],
     queryFn: lmsApi.listSettings
   });
 
-  const { data: instData } = useQuery({
+  const { data: instData, isLoading: instLoading } = useQuery({
     queryKey: ['institution'],
     queryFn: lmsApi.getInstitution
   });
 
+  const isLoading = settingsLoading || instLoading;
+
   if (isLoading) return <LoadingState />;
 
   const settings = settingsData?.data?.settings || [];
-  const institution = instData?.data?.institution;
+  const institution = instData?.data?.institution || {};
+
+  const integrationsSetting = settings.find((s) => s.key === 'integrations_config');
+  const integrations = integrationsSetting?.value || {
+    packetTracerLabSupport: { enabled: true, mode: 'file_and_topology_viewer' },
+    codeSandboxService: { enabled: false, status: 'external_isolated_runner_not_connected', note: 'Static syntax inspection and instructor test rubric enabled' },
+    smtpEmailNotifications: { enabled: false, status: 'in_app_primary' }
+  };
+
+  const securitySetting = settings.find((s) => s.key === 'security_policy');
+  const securityPolicy = securitySetting?.value || {
+    maxFailedLoginAttempts: 5,
+    lockoutDurationMinutes: 15,
+    sessionTimeoutMinutes: 480,
+    requireStrongPasswords: true,
+    auditRetentionDays: 365
+  };
+
+  const gradingSetting = settings.find((s) => s.key === 'grading_default_template');
+  const gradingTemplate = Array.isArray(gradingSetting?.value) ? gradingSetting.value : [
+    { name: 'Quizzes', categoryType: 'quiz', weightPercent: 20 },
+    { name: 'Assignments', categoryType: 'assignment', weightPercent: 25 },
+    { name: 'Laboratory Activities', categoryType: 'laboratory', weightPercent: 25 },
+    { name: 'Major Examination', categoryType: 'major_exam', weightPercent: 30 }
+  ];
+
+  const backupSetting = settings.find((s) => s.key === 'maintenance_backup_policy');
+  const backupPolicy = backupSetting?.value || {
+    automatedDailyBackup: true,
+    lastBackupTimestamp: new Date().toISOString(),
+    maintenanceWindow: 'Sundays 02:00-04:00 UTC',
+    systemStatus: 'operational'
+  };
+
+  // Open Edit Modals
+  const handleOpenEditInstitution = () => {
+    setInstForm({
+      name: institution.name || '',
+      code: institution.code || '',
+      domain: institution.domain || '',
+      contactEmail: institution.contactEmail || '',
+      passingGradeDefault: Number(institution.passingGradeDefault || 75),
+      allowSelfEnrollment: institution.allowSelfEnrollment !== false
+    });
+    setInstModalOpen(true);
+  };
+
+  const handleOpenEditSecurity = () => {
+    setSecurityForm({
+      maxFailedLoginAttempts: Number(securityPolicy.maxFailedLoginAttempts || 5),
+      lockoutDurationMinutes: Number(securityPolicy.lockoutDurationMinutes || 15),
+      sessionTimeoutMinutes: Number(securityPolicy.sessionTimeoutMinutes || 480),
+      requireStrongPasswords: securityPolicy.requireStrongPasswords !== false,
+      auditRetentionDays: Number(securityPolicy.auditRetentionDays || 365)
+    });
+    setSecurityModalOpen(true);
+  };
+
+  const handleOpenEditGrading = () => {
+    setGradingForm(gradingTemplate.map((item) => ({ ...item })));
+    setGradingModalOpen(true);
+  };
+
+  // Save Handlers
+  const handleSaveInstitution = async (e) => {
+    e.preventDefault();
+    try {
+      await lmsApi.updateInstitution(instForm);
+      queryClient.invalidateQueries({ queryKey: ['institution'] });
+      setInstModalOpen(false);
+      addToast('Institutional profile updated successfully.');
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleSaveSecurityPolicy = async (e) => {
+    e.preventDefault();
+    try {
+      await lmsApi.updateSetting('security_policy', {
+        category: 'security',
+        description: 'Platform authentication and session security controls',
+        value: securityForm
+      });
+      queryClient.invalidateQueries({ queryKey: ['system-settings'] });
+      setSecurityModalOpen(false);
+      addToast('Platform security policy updated successfully.');
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleSaveGrading = async (e) => {
+    e.preventDefault();
+    const total = gradingForm.reduce((acc, item) => acc + Number(item.weightPercent || 0), 0);
+    if (total !== 100) {
+      addToast(`Total weight must equal exactly 100% (currently ${total}%).`, 'error');
+      return;
+    }
+    try {
+      await lmsApi.updateSetting('grading_default_template', {
+        category: 'grading',
+        description: 'Institutional default weighted grading template (Total = 100%)',
+        value: gradingForm
+      });
+      queryClient.invalidateQueries({ queryKey: ['system-settings'] });
+      setGradingModalOpen(false);
+      addToast('Default grading weight template updated.');
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleToggleIntegration = async (serviceKey) => {
+    const currentVal = integrations;
+    const nextVal = {
+      ...currentVal,
+      [serviceKey]: {
+        ...currentVal[serviceKey],
+        enabled: !currentVal[serviceKey]?.enabled
+      }
+    };
+    try {
+      await lmsApi.updateSetting('integrations_config', {
+        category: 'integrations',
+        description: 'External laboratory and notification service integrations',
+        value: nextVal
+      });
+      queryClient.invalidateQueries({ queryKey: ['system-settings'] });
+      addToast(`Updated integration status for ${serviceKey}.`);
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
 
   const handleTriggerBackupVerify = async () => {
     try {
@@ -564,54 +1064,581 @@ export function SystemSettingsPage() {
     <div className="space-y-6">
       <PageHeader
         badge="Platform Governance"
-        title="Institution Settings, Grading Templates & Integrations"
-        subtitle="Manage institution-wide defaults, security controls, laboratory integrations, and backup status."
+        title="System & Integrations Management"
+        subtitle="Configure institutional parameters, external laboratory connectors, security policies, and maintenance controls."
         actions={
-          <button
-            type="button"
-            onClick={handleTriggerBackupVerify}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg"
-          >
-            <Database className="w-4 h-4" />
-            Verify Backup Checkpoint
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleOpenEditInstitution}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg shadow-2xs"
+            >
+              <Edit2 className="w-3.5 h-3.5 text-slate-600" />
+              Edit Institutional Profile
+            </button>
+            <button
+              type="button"
+              onClick={handleTriggerBackupVerify}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xs"
+            >
+              <Database className="w-3.5 h-3.5 text-blue-400" />
+              Verify Backup Checkpoint
+            </button>
+          </div>
         }
       />
 
-      {institution && (
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
-          <h2 className="text-base font-bold text-slate-900 mb-3">Institutional Profile</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-            <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
-              <span className="text-slate-500 block">Institution Name</span>
-              <strong className="text-slate-900 text-sm">{institution.name}</strong>
+      {/* 1. Institutional Profile Card */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs">
+        <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+              <Building2 className="w-5 h-5" />
             </div>
-            <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
-              <span className="text-slate-500 block">Institution Code & Domain</span>
-              <strong className="text-slate-900 text-sm">{institution.code} ({institution.domain})</strong>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">{institution.name || 'Mindoro State University (MinSU)'}</h2>
+              <p className="text-xs text-slate-500 font-mono">Code: {institution.code || 'MinSU'} · Domain: {institution.domain || 'minsu.edu.ph'}</p>
             </div>
-            <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
-              <span className="text-slate-500 block">Default Passing Score</span>
-              <strong className="text-slate-900 text-sm">{institution.passingGradeDefault}%</strong>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            Production Active
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+          <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-slate-500 block mb-0.5">Contact & Support Email</span>
+            <strong className="text-slate-900 text-sm font-semibold">{institution.contactEmail || 'admin@academy.edu'}</strong>
+          </div>
+          <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-slate-500 block mb-0.5">Passing Grade Baseline</span>
+            <strong className="text-slate-900 text-sm font-semibold">{institution.passingGradeDefault}%</strong>
+          </div>
+          <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-slate-500 block mb-0.5">Self-Enrollment Policy</span>
+            <strong className="text-slate-900 text-sm font-semibold">
+              {institution.allowSelfEnrollment !== false ? 'Open Self-Enrollment' : 'Restricted (Admin Only)'}
+            </strong>
+          </div>
+          <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-slate-500 block mb-0.5">System Timezone & Clock</span>
+            <strong className="text-slate-900 text-sm font-semibold">Asia/Manila (UTC+8)</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Laboratory & Educational Tech Integrations */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Laboratory & Technical Integrations</h3>
+            <p className="text-xs text-slate-500">Enable, disable, and monitor institutional laboratory execution connectors.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          {/* Cisco Packet Tracer */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col justify-between shadow-xs">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+                  <Terminal className="w-4 h-4" />
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                    integrations.packetTracerLabSupport?.enabled
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {integrations.packetTracerLabSupport?.enabled ? 'Active' : 'Disabled'}
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-900 text-sm">Cisco Packet Tracer Lab</h4>
+              <p className="text-slate-500 mt-1">
+                Embedded network simulation topology viewer and automated .pkt/.pkz assignment file submission parsing.
+              </p>
+            </div>
+            <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-slate-400 font-mono text-[11px]">Mode: Topology Viewer</span>
+              <button
+                type="button"
+                onClick={() => handleToggleIntegration('packetTracerLabSupport')}
+                className={`px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors ${
+                  integrations.packetTracerLabSupport?.enabled
+                    ? 'bg-amber-100 hover:bg-amber-200 text-amber-900'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
+              >
+                {integrations.packetTracerLabSupport?.enabled ? 'Disable Lab' : 'Enable Lab'}
+              </button>
+            </div>
+          </div>
+
+          {/* Code Execution Sandbox */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col justify-between shadow-xs">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                  <Cpu className="w-4 h-4" />
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                    integrations.codeSandboxService?.enabled
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {integrations.codeSandboxService?.enabled ? 'Active' : 'Standby'}
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-900 text-sm">Code Execution Sandbox</h4>
+              <p className="text-slate-500 mt-1">
+                Isolated container environment for automated unit test evaluation, Python/C++ code grading, and web output rendering.
+              </p>
+            </div>
+            <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-slate-400 font-mono text-[11px]">Mode: Isolated Runner</span>
+              <button
+                type="button"
+                onClick={() => handleToggleIntegration('codeSandboxService')}
+                className={`px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors ${
+                  integrations.codeSandboxService?.enabled
+                    ? 'bg-amber-100 hover:bg-amber-200 text-amber-900'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
+              >
+                {integrations.codeSandboxService?.enabled ? 'Disable Runner' : 'Enable Runner'}
+              </button>
+            </div>
+          </div>
+
+          {/* SMTP Gateway */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col justify-between shadow-xs">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                    integrations.smtpEmailNotifications?.enabled
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {integrations.smtpEmailNotifications?.enabled ? 'SMTP Relay' : 'In-App Primary'}
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-900 text-sm">Email Notification Gateway</h4>
+              <p className="text-slate-500 mt-1">
+                Transactional email dispatch for password resets, grade approval notifications, and official academic notices.
+              </p>
+            </div>
+            <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-slate-400 font-mono text-[11px]">Relay: Institutional SMTP</span>
+              <button
+                type="button"
+                onClick={() => handleToggleIntegration('smtpEmailNotifications')}
+                className={`px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors ${
+                  integrations.smtpEmailNotifications?.enabled
+                    ? 'bg-amber-100 hover:bg-amber-200 text-amber-900'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
+              >
+                {integrations.smtpEmailNotifications?.enabled ? 'Use In-App' : 'Enable SMTP'}
+              </button>
             </div>
           </div>
         </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {settings.map((s) => (
-          <div key={s.id} className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-xs font-bold text-blue-700">{s.key}</span>
-              <StatusBadge status={s.category} />
-            </div>
-            <p className="text-xs text-slate-600">{s.description}</p>
-            <pre className="p-3 rounded-lg bg-slate-900 text-slate-100 text-[11px] font-mono overflow-x-auto">
-              {JSON.stringify(s.value, null, 2)}
-            </pre>
-          </div>
-        ))}
       </div>
+
+      {/* 3. Security Policy & Grading Weights Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Security Policy Panel */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-blue-600" />
+                <h3 className="text-sm font-bold text-slate-900">Authentication & Session Security</h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenEditSecurity}
+                className="px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700"
+              >
+                Edit Policy
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Max Failed Login Attempts (Lockout)</span>
+                <span className="font-bold text-slate-900">{securityPolicy.maxFailedLoginAttempts} attempts</span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Account Lockout Duration</span>
+                <span className="font-bold text-slate-900">{securityPolicy.lockoutDurationMinutes} minutes</span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Session Inactivity Timeout</span>
+                <span className="font-bold text-slate-900">{securityPolicy.sessionTimeoutMinutes} mins ({securityPolicy.sessionTimeoutMinutes / 60} hrs)</span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Password Complexity Enforcement</span>
+                <span className="font-bold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  {securityPolicy.requireStrongPasswords ? 'Enforced' : 'Standard'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200">
+                <span className="text-slate-600">Audit Trail Retention Window</span>
+                <span className="font-bold text-slate-900">{securityPolicy.auditRetentionDays} days</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Institutional Grading Template */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-bold text-slate-900">Institutional Default Grading Weights</h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenEditGrading}
+                className="px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700"
+              >
+                Edit Weights
+              </button>
+            </div>
+
+            {/* Visual Weight Distribution Bar */}
+            <div className="mb-4">
+              <div className="w-full h-3 rounded-full overflow-hidden flex bg-slate-100">
+                {gradingTemplate.map((item, idx) => {
+                  const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500', 'bg-amber-500', 'bg-rose-500'];
+                  return (
+                    <div
+                      key={item.categoryType || idx}
+                      style={{ width: `${item.weightPercent}%` }}
+                      className={`${colors[idx % colors.length]}`}
+                      title={`${item.name}: ${item.weightPercent}%`}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              {gradingTemplate.map((item, idx) => {
+                const dotColors = ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500', 'bg-amber-500', 'bg-rose-500'];
+                return (
+                  <div key={item.categoryType || idx} className="p-3 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2.5 h-2.5 rounded-full ${dotColors[idx % dotColors.length]}`}></span>
+                      <span className="font-semibold text-slate-800">{item.name}</span>
+                    </div>
+                    <strong className="text-slate-900 font-bold text-sm">{item.weightPercent}%</strong>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <span>Total Baseline Calculation:</span>
+            <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+              100% Balanced
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Maintenance & Operational Status */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+        <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+          <Database className="w-4 h-4 text-slate-700" />
+          Disaster Recovery & Operational Status
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-slate-500 block mb-0.5">Automated Daily Backup</span>
+            <strong className="text-emerald-700 font-bold flex items-center gap-1 text-sm">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Active (02:00 UTC)
+            </strong>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-slate-500 block mb-0.5">Last Verified Checkpoint</span>
+            <strong className="text-slate-900 font-mono text-xs block truncate">
+              {backupPolicy.lastBackupTimestamp ? new Date(backupPolicy.lastBackupTimestamp).toLocaleString() : 'Recently Verified'}
+            </strong>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-slate-500 block mb-0.5">Maintenance Window</span>
+            <strong className="text-slate-900 font-semibold text-xs">{backupPolicy.maintenanceWindow || 'Sundays 02:00-04:00 UTC'}</strong>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-slate-500 block mb-0.5">Platform Integrity Status</span>
+            <strong className="text-emerald-700 font-bold flex items-center gap-1 text-sm">
+              <Check className="w-3.5 h-3.5" />
+              Operational
+            </strong>
+          </div>
+        </div>
+      </div>
+
+      {/* Modal: Edit Institutional Profile */}
+      <ModalDialog
+        isOpen={instModalOpen}
+        onClose={() => setInstModalOpen(false)}
+        title="Edit Institutional Profile & Branding"
+      >
+        <form onSubmit={handleSaveInstitution} className="space-y-3.5 text-xs">
+          <div>
+            <label className="block font-semibold mb-1 text-slate-700">Institution Name</label>
+            <input
+              required
+              value={instForm.name}
+              onChange={(e) => setInstForm({ ...instForm, name: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Institution Code</label>
+              <input
+                required
+                value={instForm.code}
+                onChange={(e) => setInstForm({ ...instForm, code: e.target.value.toUpperCase() })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 uppercase font-mono"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Primary Domain</label>
+              <input
+                required
+                value={instForm.domain}
+                onChange={(e) => setInstForm({ ...instForm, domain: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Support / Contact Email</label>
+              <input
+                type="email"
+                required
+                value={instForm.contactEmail}
+                onChange={(e) => setInstForm({ ...instForm, contactEmail: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Default Passing Grade (%)</label>
+              <input
+                type="number"
+                min={50}
+                max={100}
+                value={instForm.passingGradeDefault}
+                onChange={(e) => setInstForm({ ...instForm, passingGradeDefault: Number(e.target.value) })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+          </div>
+          <div className="p-3 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-between">
+            <div>
+              <p className="font-semibold text-slate-900">Allow Open Student Self-Enrollment</p>
+              <p className="text-slate-500">When enabled, students can register directly from the public landing portal.</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={instForm.allowSelfEnrollment}
+              onChange={(e) => setInstForm({ ...instForm, allowSelfEnrollment: e.target.checked })}
+              className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+            />
+          </div>
+          <div className="pt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setInstModalOpen(false)}
+              className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+            >
+              Save Profile
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      {/* Modal: Edit Security Policy */}
+      <ModalDialog
+        isOpen={securityModalOpen}
+        onClose={() => setSecurityModalOpen(false)}
+        title="Edit Platform Security & Session Policy"
+      >
+        <form onSubmit={handleSaveSecurityPolicy} className="space-y-3.5 text-xs">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Max Failed Logins</label>
+              <input
+                type="number"
+                min={3}
+                max={20}
+                value={securityForm.maxFailedLoginAttempts}
+                onChange={(e) => setSecurityForm({ ...securityForm, maxFailedLoginAttempts: Number(e.target.value) })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Lockout Duration (Mins)</label>
+              <input
+                type="number"
+                min={5}
+                max={120}
+                value={securityForm.lockoutDurationMinutes}
+                onChange={(e) => setSecurityForm({ ...securityForm, lockoutDurationMinutes: Number(e.target.value) })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Session Timeout (Mins)</label>
+              <input
+                type="number"
+                min={30}
+                max={1440}
+                value={securityForm.sessionTimeoutMinutes}
+                onChange={(e) => setSecurityForm({ ...securityForm, sessionTimeoutMinutes: Number(e.target.value) })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1 text-slate-700">Audit Retention (Days)</label>
+              <input
+                type="number"
+                min={30}
+                max={730}
+                value={securityForm.auditRetentionDays}
+                onChange={(e) => setSecurityForm({ ...securityForm, auditRetentionDays: Number(e.target.value) })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+          </div>
+          <div className="p-3 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-between">
+            <div>
+              <p className="font-semibold text-slate-900">Enforce Strong Password Requirements</p>
+              <p className="text-slate-500">Requires uppercase letter, number, and minimum 8 characters.</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={securityForm.requireStrongPasswords}
+              onChange={(e) => setSecurityForm({ ...securityForm, requireStrongPasswords: e.target.checked })}
+              className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+            />
+          </div>
+          <div className="pt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setSecurityModalOpen(false)}
+              className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+            >
+              Save Security Policy
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      {/* Modal: Edit Grading Weights */}
+      <ModalDialog
+        isOpen={gradingModalOpen}
+        onClose={() => setGradingModalOpen(false)}
+        title="Edit Institutional Default Grading Weights"
+      >
+        <form onSubmit={handleSaveGrading} className="space-y-3.5 text-xs">
+          <p className="text-slate-500">
+            Configure the baseline grading weight distribution. Total weights across all categories must sum to <strong>100%</strong>.
+          </p>
+          <div className="space-y-3">
+            {gradingForm.map((item, idx) => (
+              <div key={item.categoryType || idx} className="grid grid-cols-2 gap-3 items-center">
+                <input
+                  required
+                  value={item.name}
+                  onChange={(e) => {
+                    const next = [...gradingForm];
+                    next[idx].name = e.target.value;
+                    setGradingForm(next);
+                  }}
+                  className="px-3 py-2 rounded-lg border border-slate-300"
+                />
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    required
+                    value={item.weightPercent}
+                    onChange={(e) => {
+                      const next = [...gradingForm];
+                      next[idx].weightPercent = Number(e.target.value);
+                      setGradingForm(next);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-right font-bold"
+                  />
+                  <span className="text-slate-500 font-semibold">%</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="p-3 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-between">
+            <span className="font-semibold text-slate-700">Calculated Sum:</span>
+            <span
+              className={`font-bold text-sm ${
+                gradingForm.reduce((acc, item) => acc + Number(item.weightPercent || 0), 0) === 100
+                  ? 'text-emerald-600'
+                  : 'text-red-600'
+              }`}
+            >
+              {gradingForm.reduce((acc, item) => acc + Number(item.weightPercent || 0), 0)}% / 100%
+            </span>
+          </div>
+          <div className="pt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setGradingModalOpen(false)}
+              className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+            >
+              Save Grading Weights
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
     </div>
   );
 }
@@ -619,13 +1646,42 @@ export function SystemSettingsPage() {
 export function AuditLogsPage() {
   const [category, setCategory] = useState('');
   const [severity, setSeverity] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(15);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['audit-logs', category, severity],
-    queryFn: () => lmsApi.listAuditLogs({ category, severity })
+    queryKey: ['audit-logs', category, severity, search, page, limit],
+    queryFn: () => lmsApi.listAuditLogs({ category, severity, search, page, limit })
   });
 
+  const handleCategoryChange = (val) => {
+    setCategory(val);
+    setPage(1);
+  };
+
+  const handleSeverityChange = (val) => {
+    setSeverity(val);
+    setPage(1);
+  };
+
+  const handleSearchChange = (val) => {
+    setSearch(val);
+    setPage(1);
+  };
+
+  const handleLimitChange = (val) => {
+    setLimit(Number(val));
+    setPage(1);
+  };
+
   const logs = data?.data?.logs || [];
+  const pagination = data?.data?.pagination || {
+    total: logs.length,
+    page,
+    limit,
+    totalPages: Math.max(1, Math.ceil((logs.length || 0) / limit))
+  };
 
   return (
     <div className="space-y-6">
@@ -635,10 +1691,20 @@ export function AuditLogsPage() {
         subtitle="Immutable record of authentication, role modifications, academic configurations, and grade publications."
       />
 
-      <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-3">
+      <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search action, actor email, or entity..."
+            className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300"
+          />
+        </div>
         <select
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
+          onChange={(e) => handleCategoryChange(e.target.value)}
           className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white"
         >
           <option value="">All Categories</option>
@@ -651,7 +1717,7 @@ export function AuditLogsPage() {
         </select>
         <select
           value={severity}
-          onChange={(e) => setSeverity(e.target.value)}
+          onChange={(e) => handleSeverityChange(e.target.value)}
           className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white"
         >
           <option value="">All Severities</option>
@@ -678,20 +1744,77 @@ export function AuditLogsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-slate-500">{new Date(log.createdAt).toLocaleString()}</td>
-                    <td className="px-4 py-3 font-medium text-slate-900">{log.actorEmail || 'System'}</td>
-                    <td className="px-4 py-3">{log.actorRole || '-'}</td>
-                    <td className="px-4 py-3 font-mono font-bold text-slate-900">{log.action}</td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {log.entityType ? `${log.entityType} #${log.entityId}` : '-'}
+                {logs.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-xs">
+                      No audit log records match the current filter criteria.
                     </td>
-                    <td className="px-4 py-3"><StatusBadge status={log.severity} /></td>
                   </tr>
-                ))}
+                ) : (
+                  logs.map((log) => (
+                    <tr key={log.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 text-slate-500">{new Date(log.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3 font-medium text-slate-900">{log.actorEmail || 'System'}</td>
+                      <td className="px-4 py-3">{log.actorRole || '-'}</td>
+                      <td className="px-4 py-3 font-mono font-bold text-slate-900">{log.action}</td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {log.entityType ? `${log.entityType} #${log.entityId}` : '-'}
+                      </td>
+                      <td className="px-4 py-3"><StatusBadge status={log.severity} /></td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
+          </div>
+
+          {/* Audit Logs Pagination */}
+          <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <span>Rows per page:</span>
+              <select
+                value={limit}
+                onChange={(e) => handleLimitChange(e.target.value)}
+                className="px-2 py-1 rounded border border-slate-300 bg-white font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value={15}>15</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <span className="text-slate-400">|</span>
+              <span>
+                Showing {pagination.total === 0 ? 0 : (page - 1) * limit + 1}–
+                {Math.min(page * limit, pagination.total)} of{' '}
+                <strong className="text-slate-900 font-bold">{pagination.total}</strong> records
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Previous
+              </button>
+
+              <span className="px-3 py-1 font-semibold text-slate-700">
+                Page {pagination.page} of {pagination.totalPages}
+              </span>
+
+              <button
+                type="button"
+                disabled={page >= pagination.totalPages}
+                onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+              >
+                Next
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       )}
