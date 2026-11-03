@@ -1090,18 +1090,153 @@ async function manualGradeAttempt(req, res, next) {
   }
 }
 
+// ============================================================================
+// UPDATE & DELETE — ASSIGNMENTS
+// ============================================================================
+
+async function updateAssignment(req, res, next) {
+  const t = await sequelize.transaction();
+  try {
+    const assignment = await Assignment.findByPk(Number(req.params.id), { transaction: t });
+    if (!assignment) throw new AppError('Assignment not found.', 404);
+    await verifyClassAccess(req.user, assignment.classId, { allowAdmin: true, allowInstructor: true });
+
+    const allowed = ['title', 'instructions', 'dueDate', 'cutoffDate', 'maxScore', 'assignmentType',
+      'allowLateSubmissions', 'latePenaltyPercent', 'allowResubmission', 'maxAttempts',
+      'starterCode', 'allowedFileTypes', 'publicationStatus'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+
+    await assignment.update(updates, { transaction: t });
+    await t.commit();
+
+    await recordAudit({ req, action: 'ASSIGNMENT_UPDATED', category: 'assessment',
+      entityType: 'Assignment', entityId: assignment.id, metadata: updates });
+
+    return res.status(200).json({ success: true, message: 'Assignment updated.', data: { assignment } });
+  } catch (err) {
+    await t.rollback();
+    return next(err);
+  }
+}
+
+async function deleteAssignment(req, res, next) {
+  try {
+    const assignment = await Assignment.findByPk(Number(req.params.id));
+    if (!assignment) throw new AppError('Assignment not found.', 404);
+    await verifyClassAccess(req.user, assignment.classId, { allowAdmin: true, allowInstructor: true });
+
+    await assignment.destroy();
+
+    await recordAudit({ req, action: 'ASSIGNMENT_DELETED', category: 'assessment',
+      entityType: 'Assignment', entityId: Number(req.params.id) });
+
+    return res.status(200).json({ success: true, message: 'Assignment deleted.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// ============================================================================
+// UPDATE & DELETE — ASSESSMENTS
+// ============================================================================
+
+async function updateAssessment(req, res, next) {
+  try {
+    const assessment = await Assessment.findByPk(Number(req.params.id));
+    if (!assessment) throw new AppError('Assessment not found.', 404);
+    await verifyClassAccess(req.user, assessment.classId, { allowAdmin: true, allowInstructor: true });
+
+    const allowed = ['title', 'assessmentType', 'instructions', 'timeLimitMinutes', 'maxScore',
+      'openDate', 'closeDate', 'maxAttempts', 'randomizeQuestions', 'randomizeOptions',
+      'autoPublishResults', 'allowLateAttempts', 'publicationStatus'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+
+    await assessment.update(updates);
+
+    await recordAudit({ req, action: 'ASSESSMENT_UPDATED', category: 'assessment',
+      entityType: 'Assessment', entityId: assessment.id, metadata: updates });
+
+    return res.status(200).json({ success: true, message: 'Assessment updated.', data: { assessment } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function deleteAssessment(req, res, next) {
+  try {
+    const assessment = await Assessment.findByPk(Number(req.params.id));
+    if (!assessment) throw new AppError('Assessment not found.', 404);
+    await verifyClassAccess(req.user, assessment.classId, { allowAdmin: true, allowInstructor: true });
+
+    await assessment.destroy();
+
+    await recordAudit({ req, action: 'ASSESSMENT_DELETED', category: 'assessment',
+      entityType: 'Assessment', entityId: Number(req.params.id) });
+
+    return res.status(200).json({ success: true, message: 'Assessment deleted.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// ============================================================================
+// UPDATE & DELETE — QUESTIONS
+// ============================================================================
+
+async function updateQuestion(req, res, next) {
+  try {
+    const question = await Question.findByPk(Number(req.params.id));
+    if (!question) throw new AppError('Question not found.', 404);
+
+    const allowed = ['prompt', 'questionType', 'difficulty', 'points', 'codeSnippet',
+      'correctAnswerText', 'explanation', 'topic'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    await question.update(updates);
+
+    return res.status(200).json({ success: true, message: 'Question updated.', data: { question } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function deleteQuestion(req, res, next) {
+  try {
+    const question = await Question.findByPk(Number(req.params.id));
+    if (!question) throw new AppError('Question not found.', 404);
+    await question.update({ isArchived: true });
+    return res.status(200).json({ success: true, message: 'Question archived.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   listAssignments,
   getAssignmentById,
   createAssignment,
+  updateAssignment,
+  deleteAssignment,
   listSubmissions,
   submitAssignmentWork,
   reviewOrGradeSubmission,
   listQuestionBanks,
   createQuestionBank,
   createQuestion,
+  updateQuestion,
+  deleteQuestion,
   listAssessments,
   createAssessment,
+  updateAssessment,
+  deleteAssessment,
   startOrResumeAttempt,
   saveAttemptAnswers,
   submitAttempt,
