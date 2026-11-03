@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Users, ClipboardCheck, Flag, MessageSquare, Megaphone, Send,
   FileSpreadsheet, Download, Plus, CheckCircle2, AlertTriangle,
-  Pencil, Trash2, Search
+  Pencil, Trash2, Search, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { lmsApi, extractErrorMessage } from '../services/api';
@@ -644,6 +644,8 @@ export function SharedReportsPage() {
   const [classId,     setClassId]     = useState('');
   const [semesterId,  setSemesterId]  = useState('');
   const [searchText,  setSearchText]  = useState('');
+  const [page,        setPage]        = useState(1);
+  const [limit,       setLimit]       = useState(10);
 
   // Report types that need a class selector
   const NEEDS_CLASS    = ['gradebook', 'submissions', 'certificates'];
@@ -669,6 +671,7 @@ export function SharedReportsPage() {
       setClassId(classes[0].id);
     }
     setSearchText('');
+    setPage(1);
   }, [reportType, classes]);
 
   // ── Build query params ────────────────────────────────────────────────────
@@ -696,6 +699,14 @@ export function SharedReportsPage() {
       )
     );
   }, [report.rows, searchText]);
+
+  // ── Pagination ────────────────────────────────────────────────────────────
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / limit));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = React.useMemo(() => {
+    const start = (currentPage - 1) * limit;
+    return filteredRows.slice(start, start + limit);
+  }, [filteredRows, currentPage, limit]);
 
   // ── Build download URL (browser navigation, sends session cookie) ─────────
   const buildDownloadUrl = (fmt) => {
@@ -732,7 +743,7 @@ export function SharedReportsPage() {
         {/* Report type */}
         <div className="flex flex-col gap-1 text-xs">
           <label className="font-semibold text-slate-600">Report Type</label>
-          <select value={reportType} onChange={(e) => { setReportType(e.target.value); setClassId(''); setSemesterId(''); }}
+          <select value={reportType} onChange={(e) => { setReportType(e.target.value); setClassId(''); setSemesterId(''); setSearchText(''); setPage(1); }}
             className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-medium min-w-[220px]">
             <option value="enrollments">Student Enrollment & Roster</option>
             <option value="gradebook">Class Weighted Gradebook</option>
@@ -750,7 +761,7 @@ export function SharedReportsPage() {
             <label className="font-semibold text-slate-600">
               Class Section {NEEDS_CLASS.includes(reportType) ? '' : <span className="text-slate-400 font-normal">(optional)</span>}
             </label>
-            <select value={classId} onChange={(e) => setClassId(e.target.value)}
+            <select value={classId} onChange={(e) => { setClassId(e.target.value); setPage(1); }}
               className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-medium min-w-[200px]">
               {!NEEDS_CLASS.includes(reportType) && <option value="">— All Classes —</option>}
               {NEEDS_CLASS.includes(reportType) && classes.length === 0 && <option value="">— No classes —</option>}
@@ -767,7 +778,7 @@ export function SharedReportsPage() {
         {NEEDS_SEMESTER.includes(reportType) && (
           <div className="flex flex-col gap-1 text-xs">
             <label className="font-semibold text-slate-600">Semester <span className="text-slate-400 font-normal">(optional)</span></label>
-            <select value={semesterId} onChange={(e) => setSemesterId(e.target.value)}
+            <select value={semesterId} onChange={(e) => { setSemesterId(e.target.value); setPage(1); }}
               className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-medium min-w-[180px]">
               <option value="">— All Semesters —</option>
               {semesters.map((s) => (
@@ -780,7 +791,7 @@ export function SharedReportsPage() {
         {/* Search within results */}
         <div className="flex flex-col gap-1 text-xs">
           <label className="font-semibold text-slate-600">Search in Results</label>
-          <input value={searchText} onChange={(e) => setSearchText(e.target.value)}
+          <input value={searchText} onChange={(e) => { setSearchText(e.target.value); setPage(1); }}
             placeholder="Filter rows..." type="search"
             className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs min-w-[160px]" />
         </div>
@@ -859,7 +870,7 @@ export function SharedReportsPage() {
                       </td>
                     </tr>
                   ) : (
-                    filteredRows.map((row, idx) => (
+                    pagedRows.map((row, idx) => (
                       <tr key={idx} className={`hover:bg-slate-50 ${
                         reportType === 'gradebook' && row.isPassing === 'No' ? 'bg-red-50/40' : ''
                       }`}>
@@ -875,6 +886,61 @@ export function SharedReportsPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* ── Pagination Controls ────────────────────────────────────────── */}
+          {filteredRows.length > 0 && (
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+              <div className="flex items-center gap-2">
+                <span>Rows per page:</span>
+                <select
+                  value={limit}
+                  onChange={(e) => {
+                    setLimit(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="px-2 py-1 rounded border border-slate-300 bg-white font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span className="text-slate-400">|</span>
+                <span>
+                  Showing {(currentPage - 1) * limit + 1}–
+                  {Math.min(currentPage * limit, filteredRows.length)} of{' '}
+                  <strong className="text-slate-900 font-bold">{filteredRows.length}</strong> records
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  Previous
+                </button>
+
+                <span className="px-3 py-1 font-semibold text-slate-700">
+                  Page {currentPage} of {totalPages}
+                </span>
+
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-slate-300 bg-white font-semibold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors shadow-2xs"
+                >
+                  Next
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           )}
         </div>
