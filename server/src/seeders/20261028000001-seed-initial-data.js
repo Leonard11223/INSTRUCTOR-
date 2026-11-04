@@ -445,6 +445,13 @@ module.exports = {
     });
     await models.UserRole.create({ userId: student4.id, roleId: createdRoles.student.id, assignedBy: acadAdmin.id });
 
+    await models.StudentPlacement.bulkCreate([
+      { studentId: student1.id, academicYearId: ayCurrent.id, programId: progBSIT.id, yearLevel: 4, cohortSection: 'A' },
+      { studentId: student2.id, academicYearId: ayCurrent.id, programId: progBSIT.id, yearLevel: 4, cohortSection: 'A' },
+      { studentId: student3.id, academicYearId: ayCurrent.id, programId: progBSIT.id, yearLevel: 4, cohortSection: 'A' },
+      { studentId: student4.id, academicYearId: ayCurrent.id, programId: progBSCS.id, yearLevel: 3, cohortSection: 'B' }
+    ]);
+
     // 4. Seed System Settings
     await models.SystemSetting.bulkCreate([
       {
@@ -646,6 +653,9 @@ module.exports = {
       courseOfferingId: offeringIP.id,
       sectionCode: 'BSIT 4-A',
       name: 'BSIT 4-A — Integrative Programming',
+      eligibleProgramId: progBSIT.id,
+      eligibleYearLevel: 4,
+      eligibleCohortSection: 'A',
       room: 'NetAcad Lab 301',
       schedule: 'Mon/Wed 09:00 - 11:30',
       capacity: 40,
@@ -659,6 +669,9 @@ module.exports = {
       courseOfferingId: offeringIP.id,
       sectionCode: 'BSIT 4-B',
       name: 'BSIT 4-B — Integrative Programming',
+      eligibleProgramId: progBSIT.id,
+      eligibleYearLevel: 4,
+      eligibleCohortSection: 'B',
       room: 'NetAcad Lab 302',
       schedule: 'Tue/Thu 13:00 - 15:30',
       capacity: 40,
@@ -673,6 +686,9 @@ module.exports = {
       courseOfferingId: offeringNet.id,
       sectionCode: 'BSIT 4-A (ENSA)',
       name: 'BSIT 4-A — Enterprise Networking (ENSA)',
+      eligibleProgramId: progBSIT.id,
+      eligibleYearLevel: 4,
+      eligibleCohortSection: 'A',
       room: 'Cisco Routing Lab 201',
       schedule: 'Tue/Thu 09:00 - 12:00',
       capacity: 35,
@@ -686,6 +702,9 @@ module.exports = {
       courseOfferingId: offeringSec.id,
       sectionCode: 'BSCY 3-A',
       name: 'BSCY 3-A — Cybersecurity Operations',
+      eligibleProgramId: progBSCY.id,
+      eligibleYearLevel: 3,
+      eligibleCohortSection: 'A',
       room: 'SOC Simulation Center 405',
       schedule: 'Fri 09:00 - 14:00',
       capacity: 30,
@@ -699,6 +718,9 @@ module.exports = {
       courseOfferingId: offeringDB.id,
       sectionCode: 'BSCS 3-B',
       name: 'BSCS 3-B — Database Architecture',
+      eligibleProgramId: progBSCS.id,
+      eligibleYearLevel: 3,
+      eligibleCohortSection: 'B',
       room: 'Data Engineering Lab 104',
       schedule: 'Mon/Wed 14:00 - 16:30',
       capacity: 40,
@@ -747,7 +769,6 @@ module.exports = {
       { classId: classBSIT4A.id, studentId: student3.id, status: 'enrolled', enrolledBy: acadAdmin.id },
       { classId: classENSA4A.id, studentId: student1.id, status: 'enrolled', enrolledBy: acadAdmin.id },
       { classId: classENSA4A.id, studentId: student2.id, status: 'enrolled', enrolledBy: acadAdmin.id },
-      { classId: classBSIT4B.id, studentId: student4.id, status: 'enrolled', enrolledBy: acadAdmin.id, finalNumericGrade: 91.50, finalLetterGrade: '1.25' },
       { classId: classDB3B.id, studentId: student4.id, status: 'enrolled', enrolledBy: acadAdmin.id }
     ]);
 
@@ -1766,4 +1787,3 @@ Router(config-router)# auto-cost reference-bandwidth 10000`,
     ]);
   }
 };
-

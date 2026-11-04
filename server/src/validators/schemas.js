@@ -76,6 +76,54 @@ const programSchema = z.object({
   status: z.enum(['active', 'archived']).optional().default('active')
 });
 
+const updateCourseSchema = z.object({
+  departmentId:       z.coerce.number().int().positive().optional(),
+  programId:          z.coerce.number().int().positive().optional().nullable(),
+  code:               z.string().min(3).max(40).optional(),
+  title:              z.string().min(3).max(220).optional(),
+  description:        z.string().min(10).optional(),
+  category:           z.string().max(100).optional(),
+  creditUnits:        z.coerce.number().int().min(1).max(12).optional(),
+  lectureHours:       z.coerce.number().int().min(0).max(20).optional(),
+  labHours:           z.coerce.number().int().min(0).max(20).optional(),
+  level:              z.enum(['Introductory', 'Intermediate', 'Advanced', 'Professional']).optional(),
+  deliveryMode:       z.enum(['Instructor-Led', 'Self-Paced', 'Hybrid']).optional(),
+  learningObjectives: z.array(z.string()).optional(),
+  prerequisites:      z.array(z.string()).optional(),
+  labSupportEnabled:  z.boolean().optional(),
+  publicationStatus:  z.enum(['draft', 'published', 'archived']).optional()
+});
+
+const updateCourseOfferingSchema = z.object({
+  courseId:          z.coerce.number().int().positive().optional(),
+  academicYearId:    z.coerce.number().int().positive().optional(),
+  semesterId:        z.coerce.number().int().positive().optional(),
+  offeringCode:      z.string().min(3).max(80).optional(),
+  titleOverride:     z.string().max(220).optional().nullable(),
+  enrollmentPolicy:  z.enum(['admin_only', 'instructor_approval', 'open_self_enroll']).optional(),
+  passingScore:      z.coerce.number().min(50).max(100).optional(),
+  certificateEnabled: z.boolean().optional(),
+  status:            z.enum(['draft', 'published', 'completed', 'archived']).optional()
+});
+
+const updateDepartmentSchema = z.object({
+  code:        z.string().min(2).max(40).optional(),
+  name:        z.string().min(3).max(200).optional(),
+  description: z.string().optional().nullable(),
+  headName:    z.string().max(150).optional().nullable(),
+  status:      z.enum(['active', 'archived']).optional()
+});
+
+const updateProgramSchema = z.object({
+  departmentId:  z.coerce.number().int().positive().optional(),
+  code:          z.string().min(2).max(40).optional(),
+  name:          z.string().min(3).max(200).optional(),
+  degreeType:    z.string().max(80).optional(),
+  durationYears: z.coerce.number().int().min(1).max(8).optional(),
+  description:   z.string().optional().nullable(),
+  status:        z.enum(['active', 'archived']).optional()
+});
+
 const academicYearSchema = z.object({
   name: z.string().min(4).max(60),
   startDate: z.string().min(8),
@@ -136,6 +184,17 @@ const classSectionSchema = z.object({
   allowLateSubmissions: z.boolean().optional().default(true),
   latePenaltyPercent: z.coerce.number().min(0).max(100).optional().default(10),
   instructorId: z.coerce.number().int().positive().optional().nullable()
+});
+
+const updateClassSectionSchema = z.object({
+  sectionCode:          z.string().min(2).max(60).optional(),
+  name:                 z.string().min(3).max(150).optional(),
+  room:                 z.string().max(80).optional().nullable(),
+  schedule:             z.string().max(150).optional().nullable(),
+  capacity:             z.coerce.number().int().min(1).max(500).optional(),
+  allowLateSubmissions: z.boolean().optional(),
+  latePenaltyPercent:   z.coerce.number().min(0).max(100).optional(),
+  status:               z.enum(['active', 'closed', 'archived']).optional()
 });
 
 const moduleSchema = z.object({
@@ -242,6 +301,62 @@ const assessmentSchema = z.object({
   questionIds: z.array(z.coerce.number().int().positive()).optional().default([])
 });
 
+const updateAcademicYearSchema = z.object({
+  name:      z.string().min(4).max(60).optional(),
+  startDate: z.string().min(8).optional(),
+  endDate:   z.string().min(8).optional(),
+  isCurrent: z.boolean().optional(),
+  status:    z.enum(['upcoming', 'active', 'completed', 'archived']).optional()
+});
+
+const updateSemesterSchema = z.object({
+  academicYearId:      z.coerce.number().int().positive().optional(),
+  name:                z.string().min(3).max(80).optional(),
+  code:                z.string().min(3).max(40).optional(),
+  startDate:           z.string().min(8).optional(),
+  endDate:             z.string().min(8).optional(),
+  enrollmentStartDate: z.string().optional().nullable(),
+  enrollmentEndDate:   z.string().optional().nullable(),
+  isCurrent:           z.boolean().optional(),
+  status:              z.enum(['upcoming', 'active', 'closed', 'archived']).optional()
+});
+
+const createAnnouncementSchema = z.object({
+  scope: z.enum(['institution', 'department', 'course', 'class']).optional().default('institution'),
+  departmentId: z.coerce.number().int().positive().optional().nullable(),
+  courseId: z.coerce.number().int().positive().optional().nullable(),
+  classId: z.coerce.number().int().positive().optional().nullable(),
+  title: z.string().min(3, 'Title must be at least 3 characters').max(220, 'Title cannot exceed 220 characters'),
+  content: z.string().min(10, 'Content must be at least 10 characters'),
+  priority: z.enum(['normal', 'important', 'urgent']).optional().default('normal'),
+  isPinned: z.boolean().optional().default(false),
+  publishAt: z.string().optional().nullable(),
+  expiresAt: z.string().optional().nullable()
+}).superRefine((data, ctx) => {
+  if (data.scope === 'department' && !data.departmentId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'departmentId is required when scope is "department"', path: ['departmentId'] });
+  }
+  if (data.scope === 'course' && !data.courseId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'courseId is required when scope is "course"', path: ['courseId'] });
+  }
+  if (data.scope === 'class' && !data.classId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'classId is required when scope is "class"', path: ['classId'] });
+  }
+});
+
+const updateAnnouncementSchema = z.object({
+  title: z.string().min(3).max(220).optional(),
+  content: z.string().min(10).optional(),
+  priority: z.enum(['normal', 'important', 'urgent']).optional(),
+  isPinned: z.boolean().optional(),
+  publishAt: z.string().optional().nullable(),
+  expiresAt: z.string().optional().nullable(),
+  scope: z.enum(['institution', 'department', 'course', 'class']).optional(),
+  departmentId: z.coerce.number().int().positive().optional().nullable(),
+  courseId: z.coerce.number().int().positive().optional().nullable(),
+  classId: z.coerce.number().int().positive().optional().nullable()
+});
+
 const gradeCategoriesBulkSchema = z.object({
   categories: z.array(z.object({
     id: z.coerce.number().int().positive().optional(),
@@ -271,6 +386,15 @@ module.exports = {
   assignmentSchema,
   questionSchema,
   assessmentSchema,
-  gradeCategoriesBulkSchema
+  gradeCategoriesBulkSchema,
+  createAnnouncementSchema,
+  updateAnnouncementSchema,
+  updateAcademicYearSchema,
+  updateSemesterSchema,
+  updateDepartmentSchema,
+  updateProgramSchema,
+  updateCourseSchema,
+  updateCourseOfferingSchema,
+  updateClassSectionSchema
 };
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -27,9 +27,11 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronUp,
-  BarChart3,
   FileText,
-  Lock
+  Lock,
+  ChevronsLeft,
+  ChevronsRight,
+  ChevronLeft
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { lmsApi } from '../services/api';
@@ -78,107 +80,39 @@ const NAVIGATION_BY_ROLE = {
   student: [
     { to: '/student/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     {
-      id: 'my-classes',
-      label: 'My Classes',
-      icon: Users,
+      id: 'my-learning',
+      label: 'My Learning',
+      icon: BookOpen,
       defaultOpen: true,
       children: [
-        { to: '/student/classes/semester', label: 'Current Semester' },
-        { to: '/student/classes/rosters', label: 'Class Rosters' },
-        { to: '/student/classes/schedule', label: 'Schedule / Timetable' },
+        { to: '/student/courses', label: 'My Courses' },
+        { to: '/student/classes/semester', label: 'My Classes' },
         { to: '/student/catalog', label: 'Course Catalog' }
       ]
     },
-    { to: '/student/courses', label: 'Learning Materials', icon: BookOpen },
-    { to: '/student/certificates', label: 'Completed Courses & Badges', icon: ShieldCheck },
     {
-      id: 'gradebook',
-      label: 'Gradebook',
-      icon: Award,
-      children: [
-        { to: '/student/grades', label: 'My Grades & Standing' },
-        { to: '/student/certificates', label: 'Earned Badges & Certificates' }
-      ]
-    },
-    {
-      id: 'assignments',
-      label: 'Assignments',
+      id: 'coursework',
+      label: 'Coursework',
       icon: FileText,
       children: [
-        { to: '/student/assignments', label: 'All Assignments' },
-        { to: '/student/assignments/create', label: 'Create Assignment' },
-        { to: '/student/assignments/submissions', label: 'Submissions' },
-        { to: '/student/assignments/rubrics', label: 'Rubrics' },
-        { to: '/student/assignments/due-dates', label: 'Due Dates' }
+        { to: '/student/assignments', label: 'Assignments' },
+        { to: '/student/assessments', label: 'Quizzes & Exams' }
       ]
     },
-    { to: '/student/assessments', label: 'Quizzes & Exams', icon: ClipboardCheck },
-    {
-      id: 'reports-analytics',
-      label: 'Reports & Analytics',
-      icon: BarChart3,
-      children: [
-        { to: '/student/reports/performance', label: 'Student Performance' },
-        { to: '/student/reports/statistics', label: 'Class Statistics' },
-        { to: '/student/reports/distribution', label: 'Grade Distribution' },
-        { to: '/student/reports/progress', label: 'Progress Tracking' },
-        { to: '/student/reports/export', label: 'Export Grades' }
-      ]
-    },
-    {
-      id: 'students-group',
-      label: 'Students',
-      icon: UserCircle,
-      children: [
-        { to: '/student/students/profiles', label: 'Student Profiles' },
-        { to: '/student/students/attendance', label: 'Attendance Records' },
-        { to: '/student/students/progress', label: 'Individual Progress' },
-        { to: '/student/students/communication-log', label: 'Communication Log' }
-      ]
-    },
+    { to: '/student/grades', label: 'Grades & Progress', icon: Award },
     {
       id: 'communication',
       label: 'Communication',
       icon: MessageSquare,
       children: [
         { to: '/messages', label: 'Messages' },
-        { to: '/student/communication/guardian', label: 'Parent / Guardian Contact' },
         { to: '/student/announcements', label: 'Announcements' },
-        { to: '/student/communication/feedback', label: 'Feedback Notes' },
         { to: '/student/discussions', label: 'Class Discussions' }
       ]
     },
-    {
-      id: 'calendar',
-      label: 'Calendar',
-      icon: Calendar,
-      children: [
-        { to: '/student/calendar/academic', label: 'Academic Calendar' },
-        { to: '/student/calendar/deadlines', label: 'Deadlines' },
-        { to: '/student/calendar/important-dates', label: 'Important Dates' }
-      ]
-    },
-    {
-      id: 'settings',
-      label: 'Settings',
-      icon: Settings,
-      children: [
-        { to: '/student/settings/grading-scale', label: 'Grading Scale' },
-        { to: '/student/settings/course-settings', label: 'Course Settings' },
-        { to: '/student/settings/notifications', label: 'Notifications' },
-        { to: '/profile', label: 'Profile Management' }
-      ]
-    },
-    {
-      id: 'help-support',
-      label: 'Help & Support',
-      icon: HelpCircle,
-      children: [
-        { to: '/student/help/user-guide', label: 'User Guide' },
-        { to: '/student/help/faqs', label: 'FAQs' },
-        { to: '/student/help/contact-support', label: 'Contact IT Support' }
-      ]
-    }
+    { to: '/student/certificates', label: 'Certificates', icon: ShieldCheck },
+    { to: '/student/calendar/deadlines', label: 'Calendar & Deadlines', icon: Calendar },
+    { to: '/student/help/user-guide', label: 'Help & Support', icon: HelpCircle }
   ]
 };
 
@@ -190,6 +124,9 @@ const ROLE_LABELS = {
   student: 'Student / Learner'
 };
 
+const COLLAPSED_NAV_ITEM_CLASS =
+  'mx-auto box-border flex h-[60px] min-h-[60px] w-[60px] min-w-[60px] shrink-0 items-center justify-center rounded-xl p-0';
+
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -198,7 +135,35 @@ export default function AppLayout() {
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [openGroups, setOpenGroups] = useState({ 'my-classes': true });
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState({ 'my-learning': true });
+  const [collapsedTooltip, setCollapsedTooltip] = useState(null);
+  const collapsedTooltipTimer = useRef(null);
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('minsu_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('minsu_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const userInitials = React.useMemo(() => {
+    if (!user?.fullName) return 'VA';
+    const parts = user.fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }, [user?.fullName]);
 
   const navItems = NAVIGATION_BY_ROLE[user?.primaryRole] || NAVIGATION_BY_ROLE.student;
 
@@ -240,50 +205,108 @@ export default function AppLayout() {
 
   const pathSegments = location.pathname.split('/').filter(Boolean);
 
-  const renderNavLinks = (isMobile = false) =>
+  const showCollapsedTooltip = (event, label, isCollapsed, isMobile) => {
+    if (!isCollapsed || isMobile) return;
+    window.clearTimeout(collapsedTooltipTimer.current);
+    const { top, height } = event.currentTarget.getBoundingClientRect();
+    collapsedTooltipTimer.current = window.setTimeout(() => {
+      setCollapsedTooltip({ label, top: top + height / 2 });
+    }, 350);
+  };
+
+  const hideCollapsedTooltip = () => {
+    window.clearTimeout(collapsedTooltipTimer.current);
+    setCollapsedTooltip(null);
+  };
+
+  useEffect(() => () => window.clearTimeout(collapsedTooltipTimer.current), []);
+
+  const getCollapsedTooltipProps = (label, isCollapsed, isMobile) => ({
+    onMouseEnter: (event) => showCollapsedTooltip(event, label, isCollapsed, isMobile),
+    onMouseLeave: hideCollapsedTooltip,
+    onFocus: (event) => showCollapsedTooltip(event, label, isCollapsed, isMobile),
+    onBlur: hideCollapsedTooltip
+  });
+
+  const renderNavIcon = (Icon, isCollapsed) => (
+    <span
+      className={`flex shrink-0 items-center justify-center ${
+        isCollapsed ? 'h-6 w-6' : 'h-5 w-5'
+      }`}
+      aria-hidden="true"
+    >
+      <Icon
+        className={`m-0 block shrink-0 ${isCollapsed ? 'h-6 w-6' : 'h-5 w-5'}`}
+      />
+    </span>
+  );
+
+  const renderNavLinks = (isMobile = false, isCollapsed = false) =>
     navItems.map((item) => {
       const Icon = item.icon;
 
       if (item.children) {
         const expanded = isGroupOpen(item);
         const hasActiveChild = item.children.some(
-          (c) => location.pathname === c.to
+          (c) => location.pathname === c.to || location.pathname.startsWith(`${c.to}/`)
         );
 
         return (
-          <div key={item.id} className="space-y-1">
+          <div key={item.id} className={`relative space-y-1 ${isCollapsed ? 'w-full' : ''}`}>
             <button
               type="button"
-              onClick={() => toggleGroup(item.id)}
-              className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              onClick={() => {
+                if (isCollapsed) {
+                  hideCollapsedTooltip();
+                  setSidebarCollapsed(false);
+                  setOpenGroups((previous) => ({ ...previous, [item.id]: true }));
+                } else {
+                  toggleGroup(item.id);
+                }
+              }}
+              {...getCollapsedTooltipProps(item.label, isCollapsed, isMobile)}
+              aria-label={item.label}
+              aria-expanded={expanded}
+              className={`relative flex items-center rounded-xl font-semibold transition-colors ${
+                isCollapsed
+                  ? COLLAPSED_NAV_ITEM_CLASS
+                  : 'w-full justify-between gap-3 px-3 py-2.5 text-[15px]'
+              } ${
                 hasActiveChild
-                  ? 'bg-slate-800 text-blue-400 font-semibold'
+                  ? isCollapsed
+                    ? 'bg-blue-500/15 text-blue-200 ring-1 ring-inset ring-blue-400/25 before:absolute before:left-1 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-blue-400'
+                    : 'bg-slate-800 text-blue-300 font-semibold before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-r-full before:bg-blue-400'
                   : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <span className="flex items-center gap-3">
-                <Icon className="w-4 h-4 shrink-0" />
-                <span>{item.label}</span>
-              </span>
-              {expanded ? (
-                <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+              {isCollapsed ? (
+                renderNavIcon(Icon, true)
               ) : (
-                <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                <>
+                  <span className="flex items-center gap-3">
+                    {renderNavIcon(Icon, false)}
+                    <span>{item.label}</span>
+                  </span>
+                  {expanded ? (
+                    <ChevronUp className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 shrink-0" />
+                  )}
+                </>
               )}
             </button>
 
-            {expanded && (
-              <div className="pl-9 pr-2 space-y-0.5 py-0.5">
+            {expanded && (!isCollapsed || isMobile) && (
+              <div className="space-y-0.5 py-0.5 pl-9 pr-2">
                 {item.children.map((sub) => (
                   <NavLink
                     key={`${item.id}-${sub.to}-${sub.label}`}
                     to={sub.to}
-                    end
                     onClick={() => {
                       if (isMobile) setMobileMenuOpen(false);
                     }}
                     className={({ isActive }) =>
-                      `block px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                      `block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                         isActive
                           ? 'bg-blue-600/20 text-blue-300 font-bold border border-blue-500/30'
                           : 'text-slate-400 hover:bg-slate-800/70 hover:text-white'
@@ -303,78 +326,153 @@ export default function AppLayout() {
         <NavLink
           key={item.to}
           to={item.to}
+          {...getCollapsedTooltipProps(item.label, isCollapsed, isMobile)}
+          aria-label={isCollapsed ? item.label : undefined}
           onClick={() => {
             if (isMobile) setMobileMenuOpen(false);
           }}
           className={({ isActive }) =>
-            `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            `relative flex items-center ${
+              isCollapsed
+                ? COLLAPSED_NAV_ITEM_CLASS
+                : 'w-full gap-3 px-3 py-2.5'
+            } rounded-xl font-semibold transition-colors ${
+              !isCollapsed ? 'text-[15px]' : ''
+            } ${
               isActive
-                ? 'bg-blue-600 text-white shadow-xs'
+                ? isCollapsed
+                  ? 'bg-blue-500/15 text-blue-200 ring-1 ring-inset ring-blue-400/25 before:absolute before:left-1 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-blue-400'
+                  : 'bg-slate-800 text-blue-300 shadow-xs before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-r-full before:bg-blue-400'
                 : 'text-slate-300 hover:bg-slate-800 hover:text-white'
             }`
           }
         >
-          <Icon className="w-4 h-4 shrink-0" />
-          <span>{item.label}</span>
+          {renderNavIcon(Icon, isCollapsed)}
+          {!isCollapsed && <span>{item.label}</span>}
         </NavLink>
       );
     });
 
   return (
-    <div className="min-h-screen flex bg-slate-50 text-slate-900">
+    <div className="flex min-h-screen bg-slate-50 text-slate-900">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-slate-900 text-slate-100 border-r border-slate-800 z-30">
-        <div className="flex items-center gap-3 px-5 h-16 border-b border-slate-800">
-          <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-inner">
-            <GraduationCap className="w-5 h-5" />
+      <aside
+        className={`fixed inset-y-0 z-30 hidden h-screen h-dvh flex-col overflow-x-hidden border-r border-slate-800 bg-[#101B32] text-slate-100 transition-[width] duration-200 ease-in-out lg:flex ${
+          sidebarCollapsed ? 'w-20' : 'w-64'
+        }`}
+      >
+        <div
+          className={`flex shrink-0 items-center border-b border-slate-800 ${
+            sidebarCollapsed ? 'h-[76px] justify-center px-2' : 'h-16 gap-3 px-5'
+          }`}
+        >
+          <div
+            className={`flex shrink-0 items-center justify-center rounded-xl bg-blue-600 font-bold text-white shadow-inner ${
+              sidebarCollapsed ? 'h-14 w-14' : 'h-9 w-9'
+            }`}
+          >
+            <GraduationCap className={`${sidebarCollapsed ? 'h-7 w-7' : 'h-6 w-6'}`} />
           </div>
-          <div>
+          {!sidebarCollapsed && <div>
             <span className="font-bold text-base tracking-tight text-white block leading-none">
-              MinSU NetAcad
+              Aetheria NetAcad
             </span>
             <span className="text-[11px] text-blue-400 font-medium">
-              Mindoro State University
+              Institutional Learning Hub
             </span>
-          </div>
+          </div>}
         </div>
 
         {/* Role Indicator */}
-        <div className="px-4 py-3 border-b border-slate-800/80 bg-slate-950/40">
-          <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
-            Active Role Scope
-          </p>
-          <p className="text-xs font-bold text-blue-400 mt-0.5">
-            {ROLE_LABELS[user?.primaryRole] || 'Learner'}
-          </p>
+        <div
+          {...getCollapsedTooltipProps(
+            `Active Role Scope: ${ROLE_LABELS[user?.primaryRole] || 'Learner'}`,
+            sidebarCollapsed,
+            false
+          )}
+          className={`border-b border-slate-800/80 bg-slate-950/40 ${
+            sidebarCollapsed ? 'flex h-[60px] shrink-0 items-center justify-center' : 'shrink-0 px-4 py-3'
+          }`}
+        >
+          {sidebarCollapsed ? (
+            <UserCircle className="h-[22px] w-[22px] text-slate-400" aria-hidden="true" />
+          ) : (
+            <>
+              <p className="text-[13px] uppercase tracking-wider text-slate-400 font-semibold">
+                Active Role Scope
+              </p>
+              <p className="mt-0.5 text-[13px] font-bold text-blue-400">
+                {ROLE_LABELS[user?.primaryRole] || 'Learner'}
+              </p>
+            </>
+          )}
         </div>
 
         {/* Navigation Links */}
-        <nav aria-label="Main Sidebar Navigation" className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {renderNavLinks(false)}
+        <nav
+          aria-label="Main Sidebar Navigation"
+          className={`min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-4 ${
+            sidebarCollapsed
+              ? 'flex w-full flex-col items-center gap-2 px-2'
+              : 'space-y-1 px-3'
+          }`}
+        >
+          {renderNavLinks(false, sidebarCollapsed)}
         </nav>
 
         {/* Bottom Profile & Logout */}
-        <div className="p-3 border-t border-slate-800 bg-slate-950/50">
+        <div
+          className={`mt-auto shrink-0 border-t border-slate-800 bg-slate-950/50 ${
+            sidebarCollapsed
+              ? 'flex w-full flex-col items-center gap-2 p-2'
+              : 'space-y-2 p-3'
+          }`}
+        >
           <Link
             to="/profile"
-            className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors"
+            {...getCollapsedTooltipProps(
+              `${user?.fullName || 'Profile'} · Profile`,
+              sidebarCollapsed,
+              false
+            )}
+            aria-label={sidebarCollapsed ? 'View profile' : undefined}
+            className={`flex items-center rounded-lg hover:bg-slate-800 transition-colors ${
+              sidebarCollapsed
+                ? 'flex h-[60px] w-[60px] shrink-0 items-center justify-center p-0'
+                : 'gap-3 px-3 py-2'
+            }`}
           >
-            <UserCircle className="w-8 h-8 text-blue-400 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-white truncate">{user?.fullName}</p>
-              <p className="text-[11px] text-slate-400 truncate">{user?.email}</p>
-            </div>
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-xs font-bold text-white">
+              {(user?.fullName || 'Student').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
+            </span>
+            {!sidebarCollapsed && <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-white">{user?.fullName}</p>
+              <p className="truncate text-xs text-slate-300">{user?.email}</p>
+            </div>}
           </Link>
           <button
             type="button"
             onClick={handleLogout}
-            className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-red-600/20 border border-slate-800 transition-colors"
+            {...getCollapsedTooltipProps('Sign out', sidebarCollapsed, false)}
+            aria-label={sidebarCollapsed ? 'Sign out' : undefined}
+            className={`flex items-center justify-center rounded-xl border border-slate-800 text-xs font-semibold text-slate-300 transition-colors hover:bg-red-600/20 hover:text-white ${
+              sidebarCollapsed ? 'h-12 w-[60px] shrink-0 p-0' : 'w-full gap-2 px-3 py-2'
+            }`}
           >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Sign Out</span>
+            <LogOut className={`${sidebarCollapsed ? 'h-[22px] w-[22px]' : 'h-5 w-5'}`} />
+            {!sidebarCollapsed && <span>Sign Out</span>}
           </button>
         </div>
       </aside>
+      {collapsedTooltip && sidebarCollapsed && (
+        <div
+          role="tooltip"
+          className="pointer-events-none fixed left-[88px] z-[60] -translate-y-1/2 whitespace-nowrap rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-medium text-white shadow-lg"
+          style={{ top: collapsedTooltip.top }}
+        >
+          {collapsedTooltip.label}
+        </div>
+      )}
 
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
@@ -385,7 +483,7 @@ export default function AppLayout() {
           />
           <aside className="relative w-64 max-w-xs bg-slate-900 text-white flex flex-col h-full z-10">
             <div className="flex items-center justify-between px-4 h-16 border-b border-slate-800">
-              <span className="font-bold text-base">MinSU NetAcad</span>
+              <span className="font-bold text-base">Aetheria NetAcad</span>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}
@@ -403,7 +501,7 @@ export default function AppLayout() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col lg:pl-64 min-w-0">
+      <div className={`flex-1 flex flex-col min-w-0 transition-[padding] duration-200 ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         {/* Top Header */}
         <header className="sticky top-0 z-20 h-16 bg-white/95 backdrop-blur-xs border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -415,14 +513,25 @@ export default function AppLayout() {
             >
               <Menu className="w-5 h-5" />
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                hideCollapsedTooltip();
+                toggleSidebar();
+              }}
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="hidden lg:inline-flex p-2 rounded-lg text-slate-600 hover:bg-slate-100"
+            >
+              {sidebarCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
+            </button>
 
             {/* Breadcrumbs */}
-            <nav aria-label="Breadcrumb" className="hidden sm:flex items-center gap-1.5 text-xs font-medium text-slate-500">
-              <span className="text-slate-900 font-semibold">MinSU LMS</span>
+            <nav aria-label="Breadcrumb" className="hidden sm:flex items-center gap-1.5 text-sm font-medium text-slate-600">
+              <span className="text-slate-900 font-semibold">Aetheria LMS</span>
               {pathSegments.map((seg, idx) => (
                 <React.Fragment key={idx}>
                   <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                  <span className="capitalize text-slate-700">{seg.replace(/-/g, ' ')}</span>
+                  <span className="capitalize text-slate-800">{seg.replace(/-/g, ' ')}</span>
                 </React.Fragment>
               ))}
             </nav>
@@ -491,13 +600,37 @@ export default function AppLayout() {
               )}
             </div>
 
-            <Link
-              to="/profile"
-              className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700"
-            >
-              <UserCircle className="w-4 h-4 text-blue-600" />
-              <span className="hidden md:inline">{user?.fullName}</span>
-            </Link>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setProfileOpen((open) => !open)}
+                aria-expanded={profileOpen}
+                aria-label="Open profile menu"
+                className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700"
+              >
+                <span className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {(user?.fullName || 'Student').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
+                </span>
+                <span className="hidden text-sm font-semibold md:inline">{user?.fullName}</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+              {profileOpen && (
+                <div className="absolute right-0 mt-2 w-52 rounded-lg border border-slate-200 bg-white p-2 shadow-xl z-50">
+                  <p className="px-3 py-2 text-xs font-semibold text-slate-900 truncate">{user?.fullName}</p>
+                  <p className="px-3 pb-2 text-[11px] text-slate-500 truncate">{user?.email}</p>
+                  <Link to="/profile" onClick={() => setProfileOpen(false)} className="block rounded-md px-3 py-2 text-xs text-slate-700 hover:bg-slate-100">
+                    View profile
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="w-full text-left rounded-md px-3 py-2 text-xs text-rose-700 hover:bg-rose-50"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 

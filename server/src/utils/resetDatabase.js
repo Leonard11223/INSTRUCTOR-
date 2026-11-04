@@ -1,11 +1,18 @@
-const { sequelize } = require('../models');
-const migration = require('../migrations/20261028000001-create-lms-schema');
+const { sequelize, Sequelize } = require('../models');
+const migrations = [
+  require('../migrations/20261028000001-create-lms-schema'),
+  require('../migrations/20261103000001-add-student-placements')
+];
 const seeder = require('../seeders/20261028000001-seed-initial-data');
 
 async function resetDatabase() {
   const queryInterface = sequelize.getQueryInterface();
-  await migration.down(queryInterface);
-  await migration.up(queryInterface);
+  for (const migration of [...migrations].reverse()) {
+    await migration.down(queryInterface);
+  }
+  for (const migration of migrations) {
+    await migration.up(queryInterface, Sequelize);
+  }
   await seeder.up();
 }
 
@@ -22,4 +29,3 @@ if (require.main === module) {
 }
 
 module.exports = resetDatabase;
-

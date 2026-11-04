@@ -9,13 +9,17 @@ A complete, production-quality, full-stack Role-Based Learning Management System
 1. **Super Administrator (`super_admin`)**:
    - Live platform telemetry dashboard, user provisioning & status management (`active`, `inactive`, `suspended`), interactive role-permission matrix, academic structure oversight, system configuration, and tamper-evident security & audit logs.
 2. **Academic Administrator (`academic_admin`)**:
-   - Department & degree program management, academic year & semester configuration, master course catalog, class section provisioning, instructor & TA assignments, student enrollment & section transfers, CSV bulk import, and final grade approval/locking workflows.
+   - Department & degree program management, academic year & semester configuration, master course catalog, class section provisioning, instructor & TA assignments, student program/year/cohort placement, matching-cohort enrollment, section transfers, CSV account import, and final grade approval/locking workflows.
 3. **Instructor / Teacher (`instructor`)**:
    - Assigned class dashboard, Course Studio (ordered modules, XSS-sanitized lessons, guided networking/cybersecurity labs, downloadable resources), assignments & grading rubrics, reusable multi-type question banks, server-timed quizzes & exams, submission grading, weighted gradebook management, and CSV report exports.
 4. **Teaching Assistant (`teaching_assistant`)**:
    - Assigned section roster and progress monitoring, student submission review queue, preliminary rubric scoring & feedback, submission flagging/escalation to the instructor, and class discussion moderation (with strict server-side blocks against publishing official grades or accessing unassigned sections).
 5. **Student / Learner (`student`)**:
-   - Personalized learning dashboard, course catalog & self-enrollment, interactive lesson viewer with real-time progress tracking, versioned assignment submissions (text, code, files), server-timed quiz & examination runner, personal gradebook with feedback, discussion forums, direct messaging, and verifiable completion certificates (`AIT-CERT-YYYY-XXXX`).
+   - Personalized learning dashboard, placement-filtered course catalog & self-enrollment, visible enrollment-request status, interactive lesson viewer with real-time progress tracking, versioned assignment submissions (text, code, files), server-timed quiz & examination runner, personal gradebook with feedback, discussion forums, direct messaging, and verifiable completion certificates (`AIT-CERT-YYYY-XXXX`).
+
+### Registrar-led class enrollment
+
+For each academic year, assign every student a program, year level, and cohort section in **Student Placement & Cohort Enrollment**. Configure each instructor-led class section with its eligible program and year level, and optionally a specific cohort section; existing sections can be configured with **Set Eligibility**. The registrar can then enroll all matching students at once; self-enrollment and section transfers are also checked against the placement on the server. CSV import creates student accounts only—assign placements before enrolling those students. Student join codes are not part of this workflow.
 
 ---
 

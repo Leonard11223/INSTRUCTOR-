@@ -102,7 +102,7 @@ export function StatusBadge({ status }) {
   const label = String(status || 'unknown').replace(/_/g, ' ');
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border capitalize ${badgeClass}`}>
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[13px] leading-4 font-semibold border capitalize ${badgeClass}`}>
       {label}
     </span>
   );
@@ -140,12 +140,12 @@ export function PageHeader({ badge, title, subtitle, actions }) {
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200 mb-6">
       <div>
         {badge && (
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-md mb-2">
+          <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold uppercase tracking-wider text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-md mb-2">
             {badge}
           </span>
         )}
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h1>
-        {subtitle && <p className="text-sm text-slate-600 mt-1">{subtitle}</p>}
+        <h1 className="text-[28px] font-bold leading-tight text-slate-900 tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-2 text-base leading-relaxed text-slate-600">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2.5">{actions}</div>}
     </div>
@@ -222,4 +222,3 @@ export function ModalDialog({ isOpen, onClose, title, children, maxWidth = 'max-
     </div>
   );
 }
-
