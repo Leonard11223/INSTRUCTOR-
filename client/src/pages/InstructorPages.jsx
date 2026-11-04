@@ -9,9 +9,9 @@ import {
   BookOpen, ClipboardCheck, Clock, AlertCircle, Plus, Terminal,
   Award, Send, FileDown, History, MessageSquare, ChevronRight,
   CheckCircle2, FileText, BarChart3, GraduationCap, ArrowUpRight,
-  Flag, RefreshCw, Search, Pencil, Trash2, Users, Eye
+  Flag, RefreshCw, Search, Pencil, Trash2, Users, Eye, Calendar
 } from 'lucide-react';
-import { lmsApi, extractErrorMessage } from '../services/api';
+import { lmsApi, extractErrorMessage, apiClient } from '../services/api';
 import {
   StatusBadge, LoadingState, ErrorState, ModalDialog, useToast, PageHeader, StatCard
 } from '../components/ui/SharedComponents';
@@ -205,6 +205,7 @@ export function InstructorCourseStudioPage() {
   const [resOpen, setResOpen] = useState(false);
   const [editMod, setEditMod] = useState(null);
   const [editLes, setEditLes] = useState(null);
+  const [previewLes, setPreviewLes] = useState(null);
   const [delMod, setDelMod] = useState(null);
   const [delLes, setDelLes] = useState(null);
   const [expanded, setExpanded] = useState({});
@@ -266,6 +267,12 @@ export function InstructorCourseStudioPage() {
           <button type="button" onClick={()=>{setModForm({title:'',description:'',orderIndex:1,estimatedMinutes:60});setModOpen(true);}} className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> Module</button>
           <button type="button" onClick={()=>{setLesForm({moduleId:'',title:'',lessonType:'laboratory',contentHtml:'<h2>Objectives</h2>',codeSnippet:'',estimatedMinutes:45,publicationStatus:'published'});setLesOpen(true);}} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> Lesson</button>
           <button type="button" onClick={()=>setResOpen(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> Resource</button>
+          <button type="button" disabled={!selId||(course?.modules||[]).length<2} onClick={async()=>{
+            const mods=[...(course?.modules||[])].sort((a,b)=>a.orderIndex-b.orderIndex);
+            const payload=mods.map((m,i)=>({id:m.id,orderIndex:i+1}));
+            try{await apiClient.put('/modules/reorder',{modules:payload});addToast('Module order saved.');queryClient.invalidateQueries({queryKey:['course',selId]});}
+            catch(err){addToast(extractErrorMessage(err),'error');}
+          }} className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg flex items-center gap-1.5 disabled:opacity-40">↕ Save Order</button>
         </div>
       </div>
 
@@ -302,6 +309,10 @@ export function InstructorCourseStudioPage() {
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-[11px] text-slate-500 hidden sm:block">{mod.lessons?.length||0} lessons</span>
                     <StatusBadge status={mod.publicationStatus||'draft'}/>
+                    <div className="flex flex-col">
+                      <button type="button" disabled={mi===0} onClick={async()=>{const mods=[...(course?.modules||[])];[mods[mi-1],mods[mi]]=[mods[mi],mods[mi-1]];try{await apiClient.put('/modules/reorder',{modules:mods.map((m,i)=>({id:m.id,orderIndex:i+1}))});queryClient.invalidateQueries({queryKey:['course',selId]});}catch(e){addToast(extractErrorMessage(e),'error');}}} className="text-[10px] text-slate-400 hover:text-blue-600 disabled:opacity-30 leading-none">▲</button>
+                      <button type="button" disabled={mi===(course?.modules||[]).length-1} onClick={async()=>{const mods=[...(course?.modules||[])];[mods[mi],mods[mi+1]]=[mods[mi+1],mods[mi]];try{await apiClient.put('/modules/reorder',{modules:mods.map((m,i)=>({id:m.id,orderIndex:i+1}))});queryClient.invalidateQueries({queryKey:['course',selId]});}catch(e){addToast(extractErrorMessage(e),'error');}}} className="text-[10px] text-slate-400 hover:text-blue-600 disabled:opacity-30 leading-none">▼</button>
+                    </div>
                     <button type="button" onClick={()=>openEditMod(mod)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5"/></button>
                     <button type="button" onClick={()=>setDelMod(mod)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                   </div>
@@ -313,6 +324,7 @@ export function InstructorCourseStudioPage() {
                       <div className="flex items-center gap-3 min-w-0"><span className="text-base shrink-0">{emoji[les.lessonType]||'📄'}</span><div className="min-w-0"><p className="text-xs font-semibold text-slate-900 truncate">{mi+1}.{li+1} {les.title}</p><p className="text-[11px] text-slate-500 capitalize mt-0.5">{les.lessonType?.replace(/_/g,' ')} · {les.estimatedMinutes} min</p></div></div>
                       <div className="flex items-center gap-2 shrink-0">
                         <StatusBadge status={les.publicationStatus||'draft'}/>
+                        <button type="button" onClick={()=>setPreviewLes(les)} className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors" title="Preview"><Eye className="w-3.5 h-3.5"/></button>
                         <button type="button" onClick={()=>openEditLes(les)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5"/></button>
                         <button type="button" onClick={()=>setDelLes(les)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                       </div>
@@ -382,6 +394,29 @@ export function InstructorCourseStudioPage() {
 
       <ConfirmModal isOpen={Boolean(delMod)} onClose={()=>setDelMod(null)} onConfirm={handleDelMod} title="Archive Module" message={`Archive "${delMod?.title}"? Students will no longer see it.`}/>
       <ConfirmModal isOpen={Boolean(delLes)} onClose={()=>setDelLes(null)} onConfirm={handleDelLes} title="Archive Lesson" message={`Archive "${delLes?.title}"?`}/>
+
+      {/* Lesson Preview Modal */}
+      <ModalDialog isOpen={Boolean(previewLes)} onClose={()=>setPreviewLes(null)} title={`Preview — ${previewLes?.title}`} maxWidth="max-w-2xl">
+        {previewLes&&<div className="space-y-4 text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <StatusBadge status={previewLes.publicationStatus||'draft'}/>
+            <span className="text-slate-500 capitalize">{previewLes.lessonType?.replace(/_/g,' ')} · {previewLes.estimatedMinutes} min</span>
+          </div>
+          {previewLes.contentHtml&&(
+            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 prose prose-sm max-w-none overflow-auto max-h-64"
+              dangerouslySetInnerHTML={{__html: previewLes.contentHtml}}/>
+          )}
+          {previewLes.codeSnippet&&(
+            <div>
+              <p className="font-semibold text-slate-700 mb-1.5">Code Block / CLI Snippet</p>
+              <pre className="p-3 rounded-lg bg-slate-900 text-emerald-400 font-mono text-[11px] overflow-x-auto max-h-48">{previewLes.codeSnippet}</pre>
+            </div>
+          )}
+          {!previewLes.contentHtml&&!previewLes.codeSnippet&&(
+            <p className="text-slate-400 italic text-center py-6">No content to preview yet.</p>
+          )}
+        </div>}
+      </ModalDialog>
     </div>
   );
 }
@@ -395,8 +430,13 @@ export function InstructorAssignmentsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [delItem, setDelItem] = useState(null);
+  const [extOpen, setExtOpen] = useState(null); // assignment to extend
+  const [csvOpen, setCsvOpen] = useState(false);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [extForm, setExtForm] = useState({ studentId:'', newDueDate:'', reason:'' });
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvCatId, setCsvCatId] = useState('');
   const emptyForm = { classId:'', courseId:'', title:'', assignmentType:'laboratory', instructions:'', dueDate:'', maxScore:100, starterCode:'// Starter\n', rubricCriteria:[{criterionName:'Functional Accuracy',maxPoints:50},{criterionName:'Documentation',maxPoints:50}] };
   const [form, setForm] = useState(emptyForm);
 
@@ -406,6 +446,32 @@ export function InstructorAssignmentsPage() {
 
   const openCreate = () => { setForm(emptyForm); setCreateOpen(true); };
   const openEdit = (a) => { setForm({ classId:a.classId||'', courseId:a.courseId||'', title:a.title, assignmentType:a.assignmentType, instructions:a.instructions||'', dueDate:a.dueDate?a.dueDate.slice(0,10):'', maxScore:a.maxScore, starterCode:a.starterCode||'', rubricCriteria:[] }); setEditItem(a); };
+
+  const handleExtend = async (e) => {
+    e.preventDefault();
+    try {
+      await lmsApi.extendAssignment(extOpen.id, extForm);
+      addToast(`Extension granted until ${extForm.newDueDate}.`);
+      setExtOpen(null);
+      setExtForm({ studentId:'', newDueDate:'', reason:'' });
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
+  };
+
+  const handleCsvImport = async (e) => {
+    e.preventDefault();
+    if (!csvFile || !csvCatId) { addToast('Select a file and grade category.', 'error'); return; }
+    const fd = new FormData();
+    fd.append('file', csvFile);
+    fd.append('gradeCategoryId', csvCatId);
+    // Use classId from first selected class or prompt
+    const classId = allClasses[0]?.id;
+    if (!classId) { addToast('No classes available.', 'error'); return; }
+    try {
+      const res = await lmsApi.importGradesCsv(classId, fd);
+      addToast(res.message); setCsvOpen(false); setCsvFile(null);
+      queryClient.invalidateQueries({ queryKey: ['gradebook'] });
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -459,6 +525,7 @@ export function InstructorAssignmentsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200">
         <div><Badge label="Assignments & Labs" color="indigo" icon={Terminal}/><h1 className="text-2xl font-bold text-slate-900 tracking-tight">Assignments & Laboratories</h1><p className="text-sm text-slate-500 mt-1">Configure deadlines, starter code, and grading rubrics.</p></div>
         <button type="button" onClick={openCreate} className="self-start inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg"><Plus className="w-4 h-4"/> Create Assignment</button>
+        <button type="button" onClick={()=>setCsvOpen(true)} className="self-start inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg"><FileDown className="w-3.5 h-3.5"/> Import Grades CSV</button>
       </div>
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div className="flex flex-wrap gap-2">
@@ -484,6 +551,7 @@ export function InstructorAssignmentsPage() {
                   <span className="text-xs font-semibold text-blue-600">{a.submissions?.length||0} submissions</span>
                   <button type="button" onClick={()=>openEdit(a)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5"/></button>
                   <button type="button" onClick={()=>setDelItem(a)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                  <button type="button" onClick={()=>{setExtOpen(a);setExtForm({studentId:'',newDueDate:a.dueDate?a.dueDate.slice(0,10):'',reason:'Extension granted by instructor'});}} className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors" title="Grant extension"><Calendar className="w-3.5 h-3.5"/></button>
                 </div>
               </div>
               <h3 className="text-base font-bold text-slate-900 mb-1">{a.title}</h3>
@@ -496,6 +564,38 @@ export function InstructorAssignmentsPage() {
       <ModalDialog isOpen={createOpen} onClose={()=>setCreateOpen(false)} title="Create Assignment" maxWidth="max-w-xl"><AssignmentForm/></ModalDialog>
       <ModalDialog isOpen={Boolean(editItem)} onClose={()=>setEditItem(null)} title="Edit Assignment" maxWidth="max-w-xl"><AssignmentForm/></ModalDialog>
       <ConfirmModal isOpen={Boolean(delItem)} onClose={()=>setDelItem(null)} onConfirm={handleDelete} title="Delete Assignment" message={`Delete "${delItem?.title}"? This cannot be undone.`}/>
+
+      {/* Extension Modal */}
+      <ModalDialog isOpen={Boolean(extOpen)} onClose={()=>setExtOpen(null)} title={`Grant Extension — ${extOpen?.title}`}>
+        <form onSubmit={handleExtend} className="space-y-4 text-xs">
+          <p className="text-slate-500">Grant an individual student a different due date for this assignment.</p>
+          <div><label className="block font-semibold mb-1.5">Student ID (User ID)</label><input required type="number" value={extForm.studentId} onChange={e=>setExtForm({...extForm,studentId:e.target.value})} placeholder="Enter student user ID" className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+          <div><label className="block font-semibold mb-1.5">New Due Date</label><input required type="date" value={extForm.newDueDate} onChange={e=>setExtForm({...extForm,newDueDate:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+          <div><label className="block font-semibold mb-1.5">Reason</label><input value={extForm.reason} onChange={e=>setExtForm({...extForm,reason:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+          <button type="submit" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg">Grant Extension</button>
+        </form>
+      </ModalDialog>
+
+      {/* Bulk CSV Import Modal */}
+      <ModalDialog isOpen={csvOpen} onClose={()=>setCsvOpen(false)} title="Bulk Grade Import (CSV)">
+        <form onSubmit={handleCsvImport} className="space-y-4 text-xs">
+          <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800">
+            <p className="font-semibold mb-1">CSV Format</p>
+            <p className="font-mono">studentNumber,score,feedback</p>
+            <p className="font-mono">2024-00001,92,Good work</p>
+          </div>
+          <div><label className="block font-semibold mb-1.5">Grade Category</label>
+            <select required value={csvCatId} onChange={e=>setCsvCatId(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+              <option value="">— Select category —</option>
+              <option value="1">Quizzes</option>
+              <option value="2">Assignments</option>
+              <option value="3">Laboratory Activities</option>
+              <option value="4">Major Examination</option>
+            </select></div>
+          <div><label className="block font-semibold mb-1.5">CSV File</label><input required type="file" accept=".csv" onChange={e=>setCsvFile(e.target.files[0])} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+          <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">Import Grades</button>
+        </form>
+      </ModalDialog>
     </div>
   );
 }
@@ -511,6 +611,10 @@ export function InstructorSubmissionsPage() {
   const [feedback, setFeedback] = useState('');
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [batchSelected, setBatchSelected] = useState([]);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchScore, setBatchScore] = useState(90);
+  const [batchFeedback, setBatchFeedback] = useState('');
 
   const { data, isLoading } = useQuery({ queryKey:['submissions'], queryFn:()=>lmsApi.listSubmissions() });
 
@@ -523,6 +627,22 @@ export function InstructorSubmissionsPage() {
       queryClient.invalidateQueries({ queryKey:['dashboard'] });
     } catch (err) { addToast(extractErrorMessage(err),'error'); }
   };
+
+  const handleBatchGrade = async (e) => {
+    e.preventDefault();
+    let done = 0;
+    for (const id of batchSelected) {
+      try {
+        await lmsApi.reviewSubmission(id, { score: Number(batchScore), feedback: batchFeedback });
+        done++;
+      } catch (_) {}
+    }
+    addToast(`Graded ${done} of ${batchSelected.length} submissions.`);
+    setBatchOpen(false); setBatchSelected([]);
+    queryClient.invalidateQueries({ queryKey:['submissions'] });
+  };
+
+  const toggleSelect = (id) => setBatchSelected(p => p.includes(id) ? p.filter(x=>x!==id) : [...p, id]);
 
   const all = data?.data?.submissions||[];
   const counts = { all:all.length, submitted:all.filter(s=>s.status==='submitted').length, late:all.filter(s=>s.status==='late').length, under_review:all.filter(s=>s.status==='under_review').length, graded:all.filter(s=>s.status==='graded').length, flagged:all.filter(s=>s.flaggedForInstructorReview).length };
@@ -540,6 +660,13 @@ export function InstructorSubmissionsPage() {
           <div key={k.label} className={`p-4 rounded-xl border ${k.cl}`}><p className="text-2xl font-bold">{k.v}</p><p className="text-xs font-medium mt-0.5 text-slate-600">{k.label}</p></div>
         ))}
       </div>
+      {batchSelected.length > 0 && (
+        <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs">
+          <span className="font-semibold text-blue-800">{batchSelected.length} selected</span>
+          <button type="button" onClick={()=>setBatchOpen(true)} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold">Batch Grade</button>
+          <button type="button" onClick={()=>setBatchSelected([])} className="text-blue-600 hover:underline">Clear</button>
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div className="flex flex-wrap gap-2">
           <Tab label="All" count={counts.all} active={filter==='all'} onClick={()=>setFilter('all')}/>
@@ -556,18 +683,24 @@ export function InstructorSubmissionsPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase text-[11px] tracking-wide border-b border-slate-200">
-                <tr>{['Student','Assignment','Attempt','Status','Score','Due','Action'].map(h=><th key={h} className="px-4 py-3">{h}</th>)}</tr>
+                <tr>{['','Student','Assignment','Attempt','Status','Score','Due','Action'].map(h=><th key={h} className="px-4 py-3">{h}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.length===0?<tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">No submissions match the filter.</td></tr>:filtered.map(s=>(
+                {filtered.length===0?<tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">No submissions match the filter.</td></tr>:filtered.map(s=>(
                   <tr key={s.id} className={`hover:bg-slate-50 transition-colors ${s.flaggedForInstructorReview?'bg-amber-50/30':''}`}>
+                    <td className="px-4 py-3"><input type="checkbox" checked={batchSelected.includes(s.id)} onChange={()=>toggleSelect(s.id)} className="rounded border-slate-300"/></td>
                     <td className="px-4 py-3"><p className="font-bold text-slate-900">{s.student?.firstName} {s.student?.lastName}</p><p className="text-slate-400 font-mono">{s.student?.studentNumber}</p></td>
                     <td className="px-4 py-3 font-semibold text-slate-800 max-w-[160px] truncate">{s.assignment?.title}</td>
                     <td className="px-4 py-3 text-slate-500">#{s.attemptNumber}</td>
                     <td className="px-4 py-3"><div className="flex flex-col gap-1"><StatusBadge status={s.status}/>{s.flaggedForInstructorReview&&<span className="flex items-center gap-1 text-[10px] text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded font-semibold"><Flag className="w-2.5 h-2.5"/> Flagged</span>}</div></td>
                     <td className="px-4 py-3 font-mono font-bold">{s.score!==null?`${s.score}/${s.assignment?.maxScore||100}`:<span className="text-slate-400">—</span>}</td>
                     <td className="px-4 py-3 text-slate-500">{s.assignment?.dueDate?new Date(s.assignment.dueDate).toLocaleDateString():'—'}</td>
-                    <td className="px-4 py-3"><button type="button" onClick={()=>{setSel(s);setScore(s.score??90);setFeedback(s.feedback||'');}} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-[11px] flex items-center gap-1"><Eye className="w-3 h-3"/> Evaluate</button></td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <button type="button" onClick={()=>{setSel(s);setScore(s.score??90);setFeedback(s.feedback||'');}} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-[11px] flex items-center gap-1"><Eye className="w-3 h-3"/> Evaluate</button>
+                        {s.storedFilename&&<a href={`/api/resources/${s.id}/download`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Download submitted file"><FileDown className="w-3.5 h-3.5"/></a>}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -594,6 +727,23 @@ export function InstructorSubmissionsPage() {
           </div>
         </div>}
       </ModalDialog>
+
+      {/* Batch Grade Modal */}
+      <ModalDialog isOpen={batchOpen} onClose={()=>setBatchOpen(false)} title={`Batch Grade — ${batchSelected.length} submissions`}>
+        <form onSubmit={handleBatchGrade} className="space-y-4 text-xs">
+          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
+            This will apply the same score and feedback to all {batchSelected.length} selected submissions.
+          </div>
+          <div><label className="block font-semibold mb-1.5">Score (applies to all)</label>
+            <input type="number" required value={batchScore} onChange={e=>setBatchScore(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-blue-700"/>
+            <div className="mt-2"><ProgressBar value={(batchScore/100)*100} color={batchScore>=75?'bg-emerald-500':batchScore>=50?'bg-amber-400':'bg-rose-400'}/></div>
+          </div>
+          <div><label className="block font-semibold mb-1.5">Feedback (applies to all)</label>
+            <textarea rows={3} value={batchFeedback} onChange={e=>setBatchFeedback(e.target.value)} placeholder="General feedback for this batch…" className="w-full px-3 py-2 rounded-lg border border-slate-300"/>
+          </div>
+          <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">Publish Grades for All Selected</button>
+        </form>
+      </ModalDialog>
     </div>
   );
 }
@@ -611,6 +761,9 @@ export function InstructorAssessmentsPage() {
   const [editA, setEditA] = useState(null);
   const [delA, setDelA] = useState(null);
   const [delQ, setDelQ] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(null); // assessment to add questions to
+  const [attemptsOpen, setAttemptsOpen] = useState(null); // assessment to view attempts
+  const [pickerSelected, setPickerSelected] = useState([]);
 
   const emptyA = { classId:'', courseId:'', title:'', assessmentType:'quiz', instructions:'', timeLimitMinutes:45, maxScore:100, openDate:'', closeDate:'', maxAttempts:1, randomizeQuestions:false, autoPublishResults:true, publicationStatus:'published', questionIds:[] };
   const [aForm, setAForm] = useState(emptyA);
@@ -723,6 +876,8 @@ export function InstructorAssessmentsPage() {
                 <StatusBadge status={a.assessmentType}/>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">{a.timeLimitMinutes} min · {a.maxScore} pts</span>
+                  <button type="button" onClick={()=>{setPickerSelected([]);setPickerOpen(a);}} className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors" title="Add questions from bank"><Plus className="w-3.5 h-3.5"/></button>
+                  <button type="button" onClick={()=>setAttemptsOpen(a)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="View attempts"><Eye className="w-3.5 h-3.5"/></button>
                   <button type="button" onClick={()=>openEditA(a)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5"/></button>
                   <button type="button" onClick={()=>setDelA(a)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                 </div>
@@ -816,6 +971,68 @@ export function InstructorAssessmentsPage() {
 
       <ConfirmModal isOpen={Boolean(delA)} onClose={()=>setDelA(null)} onConfirm={handleDelA} title="Delete Assessment" message={`Delete "${delA?.title}"?`}/>
       <ConfirmModal isOpen={Boolean(delQ)} onClose={()=>setDelQ(null)} onConfirm={handleDelQ} title="Archive Question" message={`Archive this question?`}/>
+
+      {/* Question Picker Modal — add questions from bank to assessment */}
+      <ModalDialog isOpen={Boolean(pickerOpen)} onClose={()=>setPickerOpen(null)} title={`Add Questions to: ${pickerOpen?.title}`} maxWidth="max-w-2xl">
+        <div className="space-y-4 text-xs">
+          <p className="text-slate-500">Select questions from your question banks to add to this assessment.</p>
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {banks.map(bank=>(
+              <div key={bank.id}>
+                <p className="font-bold text-slate-700 mb-2 sticky top-0 bg-white py-1">{bank.title}</p>
+                {(bank.questions||[]).map(q=>(
+                  <label key={q.id} className="flex items-start gap-3 p-2.5 rounded-lg border border-slate-200 mb-1.5 hover:bg-slate-50 cursor-pointer">
+                    <input type="checkbox" className="mt-0.5 rounded" checked={pickerSelected.includes(q.id)} onChange={()=>setPickerSelected(p=>p.includes(q.id)?p.filter(x=>x!==q.id):[...p,q.id])}/>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="font-mono text-blue-700 uppercase text-[10px]">{q.questionType?.replace(/_/g,' ')}</span>
+                        <span className="text-slate-500">· {q.difficulty} · {q.points}pt</span>
+                      </div>
+                      <p className="text-slate-900 truncate">{q.prompt}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+            <span className="text-slate-500">{pickerSelected.length} selected</span>
+            <button type="button" disabled={pickerSelected.length===0} onClick={async()=>{
+              try {
+                await lmsApi.updateAssessment(pickerOpen.id,{ questionIds:pickerSelected });
+                addToast(`${pickerSelected.length} questions added.`); setPickerOpen(null);
+                queryClient.invalidateQueries({queryKey:['assessments']});
+              } catch(err){addToast(extractErrorMessage(err),'error');}
+            }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold disabled:opacity-40">Add to Assessment</button>
+          </div>
+        </div>
+      </ModalDialog>
+
+      {/* Attempt History Modal */}
+      <ModalDialog isOpen={Boolean(attemptsOpen)} onClose={()=>setAttemptsOpen(null)} title={`Attempts — ${attemptsOpen?.title}`} maxWidth="max-w-2xl">
+        <div className="text-xs space-y-3">
+          {(attemptsOpen?.attempts||[]).length===0?(<p className="text-slate-400 py-6 text-center">No attempts recorded yet.</p>):(
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-slate-50 text-slate-500 uppercase text-[11px] tracking-wide border-b border-slate-200">
+                  <tr><th className="px-3 py-2">Student</th><th className="px-3 py-2">Attempt #</th><th className="px-3 py-2">Score</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Submitted</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(attemptsOpen?.attempts||[]).map(at=>(
+                    <tr key={at.id} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-semibold text-slate-900">{at.student?.firstName||'—'} {at.student?.lastName||''}</td>
+                      <td className="px-3 py-2 text-slate-500">#{at.attemptNumber}</td>
+                      <td className="px-3 py-2 font-mono font-bold">{at.totalScore!=null?`${at.totalScore}/${attemptsOpen.maxScore}`:'—'}</td>
+                      <td className="px-3 py-2"><StatusBadge status={at.status}/></td>
+                      <td className="px-3 py-2 text-slate-400">{at.submittedAt?new Date(at.submittedAt).toLocaleString():'—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </ModalDialog>
     </div>
   );
 }
@@ -829,6 +1046,7 @@ export function InstructorGradebookPage() {
   const [selClass, setSelClass] = useState(null);
   const [manOpen, setManOpen] = useState(false);
   const [catOpen, setCatOpen] = useState(false);
+  const [studentDetailOpen, setStudentDetailOpen] = useState(null);
   const [manForm, setManForm] = useState({ gradeCategoryId:'', studentId:'', itemTitle:'', score:90, maxScore:100, reason:'' });
   const [catForm, setCatForm] = useState([]);
 
@@ -837,6 +1055,12 @@ export function InstructorGradebookPage() {
 
   const classes = clsData?.data?.classes||[];
   const gb = gbData?.data||{};
+
+  // Grade distribution chart data
+  const distData = ['A','B','C','D','F'].map(letter => ({
+    grade: letter,
+    count: (gb.students||[]).filter(s => s.letterGrade === letter).length
+  }));
 
   const openCat = () => { setCatForm((gb.categories||[]).map(c=>({id:c.id,name:c.name,categoryType:c.categoryType,weightPercent:c.weightPercent}))); setCatOpen(true); };
 
@@ -897,7 +1121,7 @@ export function InstructorGradebookPage() {
                     <tr>
                       <th className="px-4 py-3">Student</th>
                       {(gb.categories||[]).map(cat=><th key={cat.id} className="px-4 py-3">{cat.name} ({cat.weightPercent}%)</th>)}
-                      <th className="px-4 py-3">Standing</th><th className="px-4 py-3">Grade</th><th className="px-4 py-3">Remarks</th>
+                      <th className="px-4 py-3">Standing</th><th className="px-4 py-3">Grade</th><th className="px-4 py-3">Remarks</th><th className="px-4 py-3">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -908,6 +1132,12 @@ export function InstructorGradebookPage() {
                         <td className={`px-4 py-3 font-mono font-bold text-sm ${gradeColor(st.standingPercentage)}`}>{st.standingPercentage!=null?`${st.standingPercentage}%`:'—'}</td>
                         <td className="px-4 py-3 font-bold">{st.institutionalGrade?`${st.institutionalGrade} (${st.letterGrade})`:'—'}</td>
                         <td className="px-4 py-3"><StatusBadge status={st.isPassing?'active':'warning'}/></td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-1.5">
+                            <button type="button" onClick={()=>setStudentDetailOpen(st)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="View detail"><Eye className="w-3.5 h-3.5"/></button>
+                            <a href={`/api/reports?type=gradebook&classId=${selClass}&studentId=${st.studentId}&format=csv`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors" title="Export student grade CSV"><FileDown className="w-3.5 h-3.5"/></a>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -966,10 +1196,48 @@ export function InstructorGradebookPage() {
           <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">Save & Log</button>
         </form>
       </ModalDialog>
+
+      {/* Grade Distribution Chart */}
+      {selClass && (gb.students||[]).length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+          <SecHead title="Class Standing Distribution" sub="Grade letter breakdown for this class"/>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={distData} barCategoryGap="35%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+                <XAxis dataKey="grade" tick={{fontSize:12,fill:'#64748b'}} axisLine={false} tickLine={false}/>
+                <YAxis allowDecimals={false} tick={{fontSize:11,fill:'#64748b'}} axisLine={false} tickLine={false}/>
+                <Tooltip contentStyle={{fontSize:12,borderRadius:8,border:'1px solid #e2e8f0'}}/>
+                <Bar dataKey="count" radius={[6,6,0,0]}>
+                  {distData.map((d,i)=><Cell key={i} fill={['#059669','#2563eb','#d97706','#f97316','#dc2626'][i]}/>)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Student Detail Modal */}
+      <ModalDialog isOpen={Boolean(studentDetailOpen)} onClose={()=>setStudentDetailOpen(null)} title={`Student Detail — ${studentDetailOpen?.studentName}`} maxWidth="max-w-xl">
+        {studentDetailOpen && <div className="text-xs space-y-4">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-center"><p className={`text-2xl font-bold ${gradeColor(studentDetailOpen.standingPercentage)}`}>{studentDetailOpen.standingPercentage!=null?`${studentDetailOpen.standingPercentage}%`:'—'}</p><p className="text-slate-500 mt-0.5">Standing</p></div>
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-center"><p className="text-2xl font-bold text-slate-900">{studentDetailOpen.institutionalGrade||'—'}</p><p className="text-slate-500 mt-0.5">Grade</p></div>
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-center"><p className="text-2xl font-bold text-slate-900">{studentDetailOpen.letterGrade||'—'}</p><p className="text-slate-500 mt-0.5">Letter</p></div>
+          </div>
+          <div>
+            <p className="font-semibold text-slate-700 mb-2">Category Breakdown</p>
+            <div className="space-y-2">{(gb.categories||[]).map(cat=>{const b=studentDetailOpen.categoryBreakdown?.[cat.id];return(<div key={cat.id} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200"><span className="font-medium text-slate-700">{cat.name} ({cat.weightPercent}%)</span><span className="font-mono font-bold text-blue-700">{b?.percentage!=null?`${b.percentage}%`:'—'}</span></div>);})}</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <StatusBadge status={studentDetailOpen.isPassing?'active':'warning'}/>
+            <span className="text-slate-500">{studentDetailOpen.remarks}</span>
+          </div>
+        </div>}
+      </ModalDialog>
     </div>
   );
 }
-
 /* ══════════════════════════════════════════════════════════════
    7. CLASS MANAGEMENT — instructor-specific roster + certificates
 ══════════════════════════════════════════════════════════════ */
@@ -978,17 +1246,61 @@ export function InstructorClassManagementPage() {
   const queryClient = useQueryClient();
   const [selId, setSelId] = useState(null);
   const [certStudent, setCertStudent] = useState(null);
+  const [attendTab, setAttendTab] = useState('roster'); // 'roster' | 'attendance'
+  const [newSession, setNewSession] = useState(false);
+  const [sessionForm, setSessionForm] = useState({ sessionDate: new Date().toISOString().slice(0,10), topic: '' });
+  const [activeSession, setActiveSession] = useState(null); // session being marked
+  const [attendRecords, setAttendRecords] = useState({}); // { studentId: 'present'|'absent'|'late'|'excused' }
+  const [progressStudent, setProgressStudent] = useState(null);
 
   const { data: clsData, isLoading: clsLoading } = useQuery({ queryKey:['classes'], queryFn:lmsApi.listClasses });
   const { data: detailData, isLoading: detailLoading } = useQuery({ queryKey:['class',selId], queryFn:()=>lmsApi.getClassById(selId), enabled:Boolean(selId) });
+  const { data: attendData, refetch: refetchAttend } = useQuery({ queryKey:['attendance',selId], queryFn:()=>lmsApi.listAttendanceSessions({ classId:selId }), enabled:Boolean(selId) });
+  const { data: attendSummaryData } = useQuery({ queryKey:['attendance-summary',selId], queryFn:()=>lmsApi.getAttendanceSummary({ classId:selId }), enabled:Boolean(selId) });
 
   const classes = clsData?.data?.classes||[];
   const cls = detailData?.data?.classSection;
+  const sessions = attendData?.data?.sessions||[];
+  const attendSummary = attendSummaryData?.data?.summary||[];
 
   const handleIssueCert = async () => {
     if (!certStudent) return;
     try { await lmsApi.issueCertificate({ classId:selId, studentId:certStudent.id }); addToast('Certificate issued.'); setCertStudent(null); queryClient.invalidateQueries({ queryKey:['class',selId] }); }
     catch (err) { addToast(extractErrorMessage(err),'error'); }
+  };
+
+  const handleCreateSession = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await lmsApi.createAttendanceSession({ classId: selId, ...sessionForm });
+      addToast('Session created. Mark attendance below.');
+      setNewSession(false);
+      // Pre-populate from the created session
+      const records = {};
+      (res.data.session.records||[]).forEach(r => { records[r.studentId] = r.status; });
+      setAttendRecords(records);
+      setActiveSession(res.data.session);
+      refetchAttend();
+      queryClient.invalidateQueries({ queryKey:['attendance-summary',selId] });
+    } catch (err) { addToast(extractErrorMessage(err),'error'); }
+  };
+
+  const handleSaveAttend = async () => {
+    if (!activeSession) return;
+    const records = Object.entries(attendRecords).map(([studentId, status]) => ({ studentId: Number(studentId), status }));
+    try {
+      await lmsApi.saveAttendanceRecords(activeSession.id, records);
+      addToast('Attendance saved.'); setActiveSession(null); setAttendRecords({});
+      refetchAttend();
+      queryClient.invalidateQueries({ queryKey:['attendance-summary',selId] });
+    } catch (err) { addToast(extractErrorMessage(err),'error'); }
+  };
+
+  const openSession = (session) => {
+    const records = {};
+    (session.records||[]).forEach(r => { records[r.studentId] = r.status; });
+    setAttendRecords(records);
+    setActiveSession(session);
   };
 
   return (
@@ -1038,8 +1350,15 @@ export function InstructorClassManagementPage() {
             ))}</div>}
           </div>
 
+          {/* Tab switcher */}
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+            {[['roster','Roster'],['attendance','Attendance']].map(([v,l])=>(
+              <button key={v} type="button" onClick={()=>setAttendTab(v)} className={`px-4 py-2 text-xs font-semibold rounded-md transition-colors ${attendTab===v?'bg-white text-blue-700 shadow-sm':'text-slate-600 hover:text-slate-800'}`}>{l}</button>
+            ))}
+          </div>
+
           {/* Roster */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+          {attendTab==='roster'&&<div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
             <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
               <h2 className="text-sm font-bold text-slate-900">Class Roster ({cls.memberships?.length||0} students)</h2>
             </div>
@@ -1063,9 +1382,77 @@ export function InstructorClassManagementPage() {
                 </tbody>
               </table>
             </div>
-          </div>
+          </div>}
+
+          {/* Attendance Panel */}
+          {attendTab==='attendance'&&<div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Attendance Sessions ({sessions.length})</h2>
+              <button type="button" onClick={()=>setNewSession(true)} className="inline-flex items-center gap-2 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg"><Plus className="w-3.5 h-3.5"/> New Session</button>
+            </div>
+
+            {/* Active session marker */}
+            {activeSession&&<div className="bg-white rounded-xl border border-blue-200 p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div><h3 className="text-sm font-bold text-slate-900">Marking: {activeSession.sessionDate}</h3><p className="text-xs text-slate-500 mt-0.5">{activeSession.topic}</p></div>
+                <button type="button" onClick={handleSaveAttend} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg">Save Attendance</button>
+              </div>
+              <div className="space-y-2">{(cls?.memberships||[]).map(m=>(
+                <div key={m.id} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs">
+                  <span className="font-semibold text-slate-900">{m.student?.firstName} {m.student?.lastName}</span>
+                  <div className="flex gap-1">
+                    {['present','late','excused','absent'].map(s=>(
+                      <button key={s} type="button" onClick={()=>setAttendRecords(p=>({...p,[m.studentId]:s}))}
+                        className={`px-2.5 py-1 rounded-lg font-semibold capitalize transition-colors ${attendRecords[m.studentId]===s?({'present':'bg-emerald-600 text-white','late':'bg-amber-500 text-white','excused':'bg-blue-500 text-white','absent':'bg-rose-600 text-white'}[s]):'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>{s}</button>
+                    ))}
+                  </div>
+                </div>
+              ))}</div>
+            </div>}
+
+            {/* Sessions list */}
+            {sessions.length===0?<p className="text-xs text-slate-400 italic">No sessions yet. Click New Session to start.</p>:(
+              <div className="space-y-2">{sessions.map(sess=>(
+                <div key={sess.id} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between">
+                  <div><p className="text-xs font-bold text-slate-900">{sess.sessionDate}</p><p className="text-[11px] text-slate-500 mt-0.5">{sess.topic||'No topic'} · {(sess.records||[]).length} records</p></div>
+                  <button type="button" onClick={()=>openSession(sess)} className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg">Edit</button>
+                </div>
+              ))}</div>
+            )}
+
+            {/* Attendance Summary */}
+            {attendSummary.length>0&&<div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="px-5 py-3 bg-slate-50 border-b border-slate-200"><h3 className="text-sm font-bold text-slate-900">Attendance Summary ({attendSummaryData?.data?.totalSessions||0} sessions)</h3></div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-500 uppercase text-[11px] border-b border-slate-200">
+                    <tr><th className="px-4 py-2">Student</th><th className="px-4 py-2">Present</th><th className="px-4 py-2">Late</th><th className="px-4 py-2">Excused</th><th className="px-4 py-2">Absent</th><th className="px-4 py-2">Rate</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">{attendSummary.map(s=>(
+                    <tr key={s.studentId} className="hover:bg-slate-50">
+                      <td className="px-4 py-2 font-semibold text-slate-900">{s.studentName}</td>
+                      <td className="px-4 py-2 text-emerald-700 font-bold">{s.present}</td>
+                      <td className="px-4 py-2 text-amber-700">{s.late}</td>
+                      <td className="px-4 py-2 text-blue-700">{s.excused}</td>
+                      <td className="px-4 py-2 text-rose-700">{s.absent}</td>
+                      <td className="px-4 py-2"><span className={`font-bold ${s.attendanceRate>=80?'text-emerald-700':s.attendanceRate>=60?'text-amber-700':'text-rose-700'}`}>{s.attendanceRate}%</span></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </div>}
+          </div>}
         </div>
       ))}
+
+      {/* New Session Modal */}
+      <ModalDialog isOpen={newSession} onClose={()=>setNewSession(false)} title="Create Attendance Session">
+        <form onSubmit={handleCreateSession} className="space-y-4 text-xs">
+          <div><label className="block font-semibold mb-1.5">Session Date</label><input required type="date" value={sessionForm.sessionDate} onChange={e=>setSessionForm({...sessionForm,sessionDate:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+          <div><label className="block font-semibold mb-1.5">Topic / Lesson</label><input value={sessionForm.topic} onChange={e=>setSessionForm({...sessionForm,topic:e.target.value})} placeholder="e.g., Module 3 Lab — OSPF" className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+          <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">Create Session</button>
+        </form>
+      </ModalDialog>
 
       <ModalDialog isOpen={Boolean(certStudent)} onClose={()=>setCertStudent(null)} title="Issue Certificate">
         {certStudent&&<div className="text-xs space-y-4">

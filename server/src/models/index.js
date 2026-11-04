@@ -63,6 +63,8 @@ const {
   Grade,
   GradeHistory,
   Certificate,
+  AttendanceSession,
+  AttendanceRecord,
   Announcement,
   DiscussionThread,
   DiscussionPost,
@@ -219,6 +221,15 @@ GradeHistory.belongsTo(User, { foreignKey: 'changedBy', as: 'editor' });
 Certificate.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
 Certificate.belongsTo(Course, { foreignKey: 'courseId', as: 'course' });
 Certificate.belongsTo(ClassSection, { foreignKey: 'classId', as: 'classSection' });
+
+// 5b. Attendance Associations
+AttendanceSession.belongsTo(ClassSection, { foreignKey: 'classId', as: 'classSection' });
+AttendanceSession.belongsTo(User, { foreignKey: 'createdBy', as: 'creator' });
+AttendanceSession.hasMany(AttendanceRecord, { foreignKey: 'sessionId', as: 'records' });
+AttendanceRecord.belongsTo(AttendanceSession, { foreignKey: 'sessionId', as: 'session' });
+AttendanceRecord.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+AttendanceRecord.belongsTo(ClassSection, { foreignKey: 'classId', as: 'classSection' });
+ClassSection.hasMany(AttendanceSession, { foreignKey: 'classId', as: 'attendanceSessions' });
 
 // 6. Communication Associations
 Announcement.belongsTo(User, { foreignKey: 'authorId', as: 'author' });

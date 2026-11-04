@@ -170,6 +170,24 @@ export const lmsApi = {
   updateDiscussionStatus: (threadId, data) =>
     apiClient.put(`/discussions/${threadId}/status`, data).then((r) => r.data),
   deleteDiscussion: (threadId) => apiClient.delete(`/discussions/${threadId}`).then((r) => r.data),
+  endorseDiscussionPost: (postId) => apiClient.put(`/discussions/posts/${postId}/endorse`).then((r) => r.data),
+
+  // ── Attendance ────────────────────────────────────────────────────────────
+  listAttendanceSessions: (params) => apiClient.get('/attendance/sessions', { params }).then((r) => r.data),
+  createAttendanceSession: (data) => apiClient.post('/attendance/sessions', data).then((r) => r.data),
+  saveAttendanceRecords: (sessionId, records) =>
+    apiClient.put(`/attendance/sessions/${sessionId}/records`, { records }).then((r) => r.data),
+  updateAttendanceRecord: (recordId, data) =>
+    apiClient.put(`/attendance/records/${recordId}`, data).then((r) => r.data),
+  getAttendanceSummary: (params) => apiClient.get('/attendance/summary', { params }).then((r) => r.data),
+
+  // ── Bulk Grade CSV Import ─────────────────────────────────────────────────
+  importGradesCsv: (classId, formData) =>
+    apiClient.post(`/grades/class/${classId}/import-csv`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data),
+
+  // ── Assignment Extension ──────────────────────────────────────────────────
+  extendAssignment: (assignmentId, data) =>
+    apiClient.post(`/assignments/${assignmentId}/extend`, data).then((r) => r.data),
 
   // ── Messages & Notifications ──────────────────────────────────────────────
   listMessages: () => apiClient.get('/messages').then((r) => r.data),

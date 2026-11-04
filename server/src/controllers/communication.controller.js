@@ -19,11 +19,26 @@ const { createNotification } = require('../utils/notifyUser');
 // Announcements
 async function listAnnouncements(req, res, next) {
   try {
-    const { scope, classId, courseId } = req.query;
+    const { scope, classId, courseId, showScheduled } = req.query;
     const where = {};
     if (scope) where.scope = scope;
     if (classId) where.classId = Number(classId);
     if (courseId) where.courseId = Number(courseId);
+
+    // Non-admin roles only see published announcements (publishAt <= now)
+    const isAdmin = req.user.roles?.includes('super_admin') || req.user.roles?.includes('academic_admin');
+    const isInstructor = req.user.roles?.includes('instructor');
+    if (!isAdmin && !(isInstructor && showScheduled === 'true')) {
+      where.publishAt = { [require('sequelize').Op.lte]: new Date() };
+    }
+
+    // Filter out expired announcements for non-staff
+    if (!isAdmin && !isInstructor) {
+      where[require('sequelize').Op.or] = [
+        { expiresAt: null },
+        { expiresAt: { [require('sequelize').Op.gt]: new Date() } }
+      ];
+    }
 
     const announcements = await Announcement.findAll({
       where,
@@ -33,6 +48,7 @@ async function listAnnouncements(req, res, next) {
       ],
       order: [
         ['isPinned', 'DESC'],
+        ['publishAt', 'DESC'],
         ['createdAt', 'DESC']
       ]
     });
@@ -54,7 +70,8 @@ async function createAnnouncement(req, res, next) {
       content,
       priority = 'normal',
       isPinned = false,
-      expiresAt
+      expiresAt,
+      publishAt
     } = req.body;
 
     if (!title || !content) {
@@ -75,6 +92,7 @@ async function createAnnouncement(req, res, next) {
       priority,
       isPinned: Boolean(isPinned),
       expiresAt: expiresAt || null,
+      publishAt: publishAt ? new Date(publishAt) : new Date(),
       authorId: req.user.id
     });
 
@@ -453,6 +471,31 @@ async function deleteDiscussionThread(req, res, next) {
   }
 }
 
+// ============================================================================
+// ENDORSE A REPLY (mark as official answer)
+// ============================================================================
+async function endorseDiscussionPost(req, res, next) {
+  try {
+    const postId = Number(req.params.postId);
+    const post = await DiscussionPost.findByPk(postId, {
+      include: [{ model: DiscussionThread, as: 'thread' }]
+    });
+    if (!post) throw new AppError('Post not found.', 404);
+
+    await verifyClassAccess(req.user, post.thread.classId, {
+      allowAdmin: true, allowInstructor: true, allowTA: true
+    });
+
+    await post.update({ isInstructorEndorsed: !post.isInstructorEndorsed });
+
+    return res.status(200).json({
+      success: true,
+      message: post.isInstructorEndorsed ? 'Reply endorsed as official answer.' : 'Endorsement removed.',
+      data: { post }
+    });
+  } catch (err) { return next(err); }
+}
+
 module.exports = {
   listAnnouncements,
   createAnnouncement,
@@ -463,6 +506,7 @@ module.exports = {
   replyToDiscussionThread,
   escalateOrResolveDiscussion,
   deleteDiscussionThread,
+  endorseDiscussionPost,
   listConversations,
   startOrSendMessage,
   listNotifications,

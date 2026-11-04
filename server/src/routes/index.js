@@ -11,6 +11,7 @@ const contentCtrl = require('../controllers/content.controller');
 const assessCtrl = require('../controllers/assessment.controller');
 const gradingCtrl = require('../controllers/grading.controller');
 const commCtrl = require('../controllers/communication.controller');
+const attendCtrl = require('../controllers/attendance.controller');
 
 const router = express.Router();
 
@@ -179,12 +180,26 @@ router.post('/discussions', requireAuth, commCtrl.createDiscussionThread);
 router.post('/discussions/:threadId/replies', requireAuth, commCtrl.replyToDiscussionThread);
 router.put('/discussions/:threadId/status', requireAuth, commCtrl.escalateOrResolveDiscussion);
 router.delete('/discussions/:threadId', requireAuth, commCtrl.deleteDiscussionThread);
+router.put('/discussions/posts/:postId/endorse', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), commCtrl.endorseDiscussionPost);
 
 router.get('/messages', requireAuth, commCtrl.listConversations);
 router.post('/messages', requireAuth, commCtrl.startOrSendMessage);
 
 router.get('/notifications', requireAuth, commCtrl.listNotifications);
 router.put('/notifications/:id/read', requireAuth, commCtrl.markNotificationRead);
+
+// 10. Attendance
+router.get('/attendance/sessions', requireAuth, attendCtrl.listSessions);
+router.post('/attendance/sessions', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), attendCtrl.createSession);
+router.put('/attendance/sessions/:sessionId/records', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), attendCtrl.saveSessionRecords);
+router.put('/attendance/records/:recordId', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), attendCtrl.updateRecord);
+router.get('/attendance/summary', requireAuth, attendCtrl.getClassAttendanceSummary);
+
+// 11. Bulk grade import (CSV)
+router.post('/grades/class/:classId/import-csv', requireAuth, requirePermission('gradebook:manage'), uploadMiddleware.single('file'), gradingCtrl.importGradesCsv);
+
+// 12. Assignment extension (per-student due-date override)
+router.post('/assignments/:id/extend', requireAuth, requirePermission('assignments:manage'), assessCtrl.extendAssignmentForStudent);
 
 module.exports = router;
 
