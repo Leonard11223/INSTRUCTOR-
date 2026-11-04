@@ -866,13 +866,33 @@ export function InstructorCourseStudioPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block font-semibold mb-1.5">Course Title</label>
-                <input required value={courseForm.title} onChange={e => setCourseForm({ ...courseForm, title: e.target.value })}
+                <input required value={courseForm.title} onChange={e => {
+                  const title = e.target.value;
+                  // Auto-generate code from title + category prefix
+                  const prefixMap = {
+                    networking: 'NET', programming: 'PRG', cybersecurity: 'SEC',
+                    database: 'DB', other: 'CRS'
+                  };
+                  const prefix = prefixMap[courseForm.category] || 'CRS';
+                  const words = title.trim().split(/\s+/);
+                  const abbr = words.length >= 2
+                    ? words.slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('')
+                    : (title.slice(0, 3).toUpperCase());
+                  const autoCode = prefix + '-' + abbr + '101';
+                  setCourseForm({ ...courseForm, title, code: autoCode });
+                }}
                   placeholder="e.g., Introduction to Networks" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
               </div>
               <div>
-                <label className="block font-semibold mb-1.5">Course Code</label>
+                <label className="block font-semibold mb-1.5">
+                  Course Code
+                  <span className="ml-1.5 text-[10px] font-normal text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">auto-suggested, editable</span>
+                </label>
                 <input required value={courseForm.code} onChange={e => setCourseForm({ ...courseForm, code: e.target.value })}
-                  placeholder="e.g., ITN-101" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono" />
+                  placeholder="e.g., NET-IN101" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono tracking-wider" />
+                {courseForm.code && (
+                  <p className="text-[11px] text-slate-400 mt-1">✏️ Feel free to change this to match your school's format</p>
+                )}
               </div>
             </div>
             <div>
@@ -883,8 +903,15 @@ export function InstructorCourseStudioPage() {
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block font-semibold mb-1.5">Category</label>
-                <select value={courseForm.category} onChange={e => setCourseForm({ ...courseForm, category: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                <select value={courseForm.category} onChange={e => {
+                  const cat = e.target.value;
+                  const prefixMap = { networking:'NET', programming:'PRG', cybersecurity:'SEC', database:'DB', other:'CRS' };
+                  const prefix = prefixMap[cat] || 'CRS';
+                  const words = courseForm.title.trim().split(/\s+/);
+                  const abbr = words.length >= 2 ? words.slice(0,2).map(w=>w[0]?.toUpperCase()||'').join('') : (courseForm.title.slice(0,3).toUpperCase() || '');
+                  const autoCode = prefix + '-' + abbr + '101';
+                  setCourseForm({ ...courseForm, category: cat, code: courseForm.title ? autoCode : courseForm.code });
+                }} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
                   <option value="networking">Networking</option>
                   <option value="programming">Programming</option>
                   <option value="cybersecurity">Cybersecurity</option>
