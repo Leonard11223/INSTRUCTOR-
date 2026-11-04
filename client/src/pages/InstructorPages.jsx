@@ -226,6 +226,7 @@ export function InstructorCourseStudioPage() {
 
   const { data: cData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
   const { data: dData, isLoading } = useQuery({ queryKey:['course',selId], queryFn:()=>lmsApi.getCourseById(selId), enabled:Boolean(selId) });
+  const { data: banksData } = useQuery({ queryKey:['question-banks'], queryFn:()=>lmsApi.listQuestionBanks() });
   const refresh = () => queryClient.invalidateQueries({ queryKey:['course',selId] });
 
   const loadJoinCode = async (classId) => {
@@ -738,7 +739,16 @@ export function InstructorCourseStudioPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold mb-1.5">Topic / Subject</label>
-                  <input value={aiTopic} onChange={e => setAiTopic(e.target.value)} placeholder="e.g., Network Security, OSPF" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+                  <input value={aiTopic} onChange={e => setAiTopic(e.target.value)}
+                    placeholder="e.g., Network Security, OSPF"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+                  {/* Quick fill buttons from course title */}
+                  {selId && (cData?.data?.courses||[]).filter(c=>c.id===selId).map(c=>(
+                    <button key={c.id} type="button" onClick={()=>setAiTopic(c.title)}
+                      className="mt-1 text-[11px] text-blue-600 hover:underline">
+                      Use: {c.title}
+                    </button>
+                  ))}
                 </div>
                 <div>
                   <label className="block font-semibold mb-1.5">Number of Questions</label>
@@ -782,12 +792,25 @@ export function InstructorCourseStudioPage() {
                 <p className="font-semibold text-slate-700">Save to Question Bank:</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-semibold mb-1 text-slate-600">Question Bank ID</label>
-                    <input type="number" id="ai-bank-id" placeholder="Bank ID" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+                    <label className="block text-[11px] font-semibold mb-1 text-slate-600">Question Bank</label>
+                    <select id="ai-bank-id" className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
+                      <option value="">— Select bank —</option>
+                      {(banksData?.data?.questionBanks||[]).map(b=>(
+                        <option key={b.id} value={b.id}>{b.title} — {b.topic}</option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      No banks? Create one in <strong>Quizzes → + New Bank</strong> first.
+                    </p>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold mb-1 text-slate-600">Course ID</label>
-                    <input type="number" id="ai-course-id" defaultValue={selId} className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+                    <label className="block text-[11px] font-semibold mb-1 text-slate-600">Course</label>
+                    <select id="ai-course-id" defaultValue={selId} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
+                      <option value="">— Select course —</option>
+                      {(cData?.data?.courses||[]).map(c=>(
+                        <option key={c.id} value={c.id}>{c.code} — {c.title}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
                 <button type="button" disabled={aiSaving} onClick={() => {
