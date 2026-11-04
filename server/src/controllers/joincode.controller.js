@@ -11,15 +11,58 @@ const {
   User
 } = require('../models');
 const { AppError } = require('../middleware/error.middleware');
-const { verifyClassAccess } = require('../middleware/auth.middleware');
 const { recordAudit } = require('../utils/auditLogger');
 const { createNotification } = require('../utils/notifyUser');
+
+/* ── Access check — allows admin OR instructor assigned to class
+   OR instructor who teaches ANY class of the same course ────── */
+async function checkInstructorAccess(user, classId) {
+  if (!classId) throw new AppError('Invalid class ID.', 400);
+
+  const isAdmin = user.roles?.includes('super_admin') || user.roles?.includes('academic_admin');
+  if (isAdmin) return true;
+
+  const classSection = await ClassSection.findByPk(classId, {
+    include: [{ model: CourseOffering, as: 'courseOffering' }]
+  });
+  if (!classSection) throw new AppError('Class section not found.', 404);
+
+  // Check direct assignment
+  const directAssign = await InstructorAssignment.findOne({
+    where: { classId, instructorId: user.id }
+  });
+  if (directAssign) return true;
+
+  // Check if instructor teaches any other class of the same course
+  const courseId = classSection.courseOffering?.courseId;
+  if (courseId) {
+    const offerings = await CourseOffering.findAll({ where: { courseId } });
+    const offeringIds = offerings.map(o => o.id);
+    if (offeringIds.length > 0) {
+      const { Op } = require('sequelize');
+      const relatedClasses = await ClassSection.findAll({
+        where: { courseOfferingId: { [Op.in]: offeringIds } }
+      });
+      const relatedClassIds = relatedClasses.map(c => c.id);
+      const anyAssign = await InstructorAssignment.findOne({
+        where: { classId: { [Op.in]: relatedClassIds }, instructorId: user.id }
+      });
+      if (anyAssign) return true;
+    }
+  }
+
+  // Also allow if course was created by this instructor
+  const course = await Course.findByPk(courseId);
+  if (course && course.createdBy === user.id) return true;
+
+  throw new AppError('Forbidden: You do not have access to this class section.', 403);
+}
 
 /* ── Generate / toggle join code ────────────────────────── */
 async function generateJoinCode(req, res, next) {
   try {
     const classId = Number(req.params.classId);
-    await verifyClassAccess(req.user, classId, { allowAdmin: true, allowInstructor: true });
+    await checkInstructorAccess(req.user, classId);
 
     const classSection = await ClassSection.findByPk(classId);
     if (!classSection) throw new AppError('Class section not found.', 404);
@@ -159,7 +202,7 @@ async function joinClassByCode(req, res, next) {
 async function getPendingEnrollments(req, res, next) {
   try {
     const classId = Number(req.params.classId);
-    await verifyClassAccess(req.user, classId, { allowAdmin: true, allowInstructor: true });
+    await checkInstructorAccess(req.user, classId);
 
     const pending = await ClassMembership.findAll({
       where: { classId, status: 'pending' },
@@ -182,7 +225,7 @@ async function approveEnrollment(req, res, next) {
     });
     if (!membership) throw new AppError('Membership record not found.', 404);
 
-    await verifyClassAccess(req.user, membership.classId, { allowAdmin: true, allowInstructor: true });
+    await checkInstructorAccess(req.user, membership.classId);
 
     if (membership.status !== 'pending') {
       throw new AppError('This enrollment is not pending approval.', 400);
@@ -228,7 +271,7 @@ async function rejectEnrollment(req, res, next) {
     });
     if (!membership) throw new AppError('Membership record not found.', 404);
 
-    await verifyClassAccess(req.user, membership.classId, { allowAdmin: true, allowInstructor: true });
+    await checkInstructorAccess(req.user, membership.classId);
 
     await membership.destroy();
 
@@ -258,7 +301,7 @@ async function rejectEnrollment(req, res, next) {
 async function getJoinCodeInfo(req, res, next) {
   try {
     const classId = Number(req.params.classId);
-    await verifyClassAccess(req.user, classId, { allowAdmin: true, allowInstructor: true });
+    await checkInstructorAccess(req.user, classId);
 
     const classSection = await ClassSection.findByPk(classId, {
       attributes: ['id', 'sectionCode', 'joinCode', 'joinCodeEnabled', 'capacity'],
