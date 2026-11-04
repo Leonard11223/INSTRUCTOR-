@@ -197,6 +197,27 @@ const updateClassSectionSchema = z.object({
   status:               z.enum(['active', 'closed', 'archived']).optional()
 });
 
+const studentPlacementSchema = z.object({
+  studentId: z.coerce.number().int().positive(),
+  academicYearId: z.coerce.number().int().positive(),
+  programId: z.coerce.number().int().positive(),
+  yearLevel: z.coerce.number().int().min(1).max(8),
+  cohortSection: z.string().trim().min(1).max(60)
+});
+
+const classEligibilitySchema = z.object({
+  eligibleProgramId: z.coerce.number().int().positive().nullable(),
+  eligibleYearLevel: z.coerce.number().int().min(1).max(8).nullable(),
+  eligibleCohortSection: z.string().trim().min(1).max(60).nullable()
+}).superRefine((eligibility, context) => {
+  if (Boolean(eligibility.eligibleProgramId) !== Boolean(eligibility.eligibleYearLevel)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'eligibleProgramId and eligibleYearLevel must both be provided together or both be null.'
+    });
+  }
+});
+
 const moduleSchema = z.object({
   courseId: z.coerce.number().int().positive(),
   title: z.string().min(2).max(220),
@@ -381,6 +402,8 @@ module.exports = {
   courseSchema,
   courseOfferingSchema,
   classSectionSchema,
+  studentPlacementSchema,
+  classEligibilitySchema,
   moduleSchema,
   lessonSchema,
   assignmentSchema,

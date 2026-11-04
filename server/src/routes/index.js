@@ -104,11 +104,18 @@ router.get('/classes/:id', requireAuth, acadCtrl.getClassById);
 router.post('/classes', requireAuth, requirePermission('classes:manage'), acadCtrl.createClassSection);
 router.post('/classes/:id/instructors', requireAuth, requirePermission('classes:manage'), acadCtrl.assignInstructorToClass);
 router.post('/classes/:id/teaching-assistants', requireAuth, requirePermission('classes:manage'), acadCtrl.assignTaToClass);
+router.put('/classes/:id/eligibility', requireAuth, requirePermission('classes:manage'), acadCtrl.updateClassEligibility);
+router.post('/classes/:id/enroll-eligible', requireAuth, requirePermission('classes:manage'), acadCtrl.enrollEligibleStudents);
 
 router.get('/enrollments', requireAuth, acadCtrl.listEnrollments);
 router.post('/enrollments', requireAuth, acadCtrl.enrollStudent);
 router.post('/enrollments/transfer', requireAuth, requirePermission('enrollments:manage'), acadCtrl.transferStudentSection);
 router.post('/enrollments/import-csv', requireAuth, requirePermission('enrollments:manage'), acadCtrl.importRecordsCsv);
+
+router.get('/student/placements', requireAuth, requireRole('student'), acadCtrl.listStudentPlacements);
+router.get('/student-placements', requireAuth, requirePermission('users:read'), acadCtrl.listStudentPlacements);
+router.post('/student-placements', requireAuth, requirePermission('classes:manage'), acadCtrl.setStudentPlacement);
+router.put('/student-placements', requireAuth, requirePermission('classes:manage'), acadCtrl.setStudentPlacement);
 
 // 6. Content (/api/modules, /api/lessons, /api/resources, /api/progress)
 router.get('/modules', requireAuth, contentCtrl.listModules);

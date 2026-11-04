@@ -9,6 +9,7 @@ const {
   Course,
   CourseOffering,
   ClassSection,
+  StudentPlacement,
   InstructorAssignment,
   TeachingAssistantAssignment,
   ClassMembership,
@@ -39,8 +40,18 @@ const {
   updateCourseSchema,
   updateCourseOfferingSchema,
   classSectionSchema,
-  updateClassSectionSchema
+  updateClassSectionSchema,
+  studentPlacementSchema,
+  classEligibilitySchema
 } = require('../validators/schemas');
+
+function isPlacementEligibleForSection(placement, classSection) {
+  if (!placement) return false;
+  return (!classSection.eligibleProgramId || classSection.eligibleProgramId === placement.programId) &&
+    (!classSection.eligibleYearLevel || classSection.eligibleYearLevel === placement.yearLevel) &&
+    (!classSection.eligibleCohortSection ||
+      classSection.eligibleCohortSection.toLowerCase() === placement.cohortSection.toLowerCase());
+}
 
 // Institutions
 async function getInstitution(req, res, next) {
@@ -1196,6 +1207,38 @@ async function deleteClassSection(req, res, next) {
   }
 }
 
+async function updateClassEligibility(req, res, next) {
+  try {
+    const payload = classEligibilitySchema.parse(req.body);
+    const classSection = await ClassSection.findByPk(req.params.id);
+    if (!classSection) throw new AppError('Class section not found.', 404, 'CLASS_NOT_FOUND');
+    if (payload.eligibleProgramId) {
+      const program = await Program.findByPk(payload.eligibleProgramId);
+      if (!program || program.status !== 'active') {
+        throw new AppError('Eligible program not found or inactive.', 400, 'INVALID_ELIGIBLE_PROGRAM');
+      }
+    }
+
+    await classSection.update(payload);
+    await recordAudit({
+      req,
+      action: 'CLASS_ELIGIBILITY_UPDATED',
+      category: 'academic',
+      entityType: 'ClassSection',
+      entityId: classSection.id,
+      metadata: payload
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Class eligibility rules updated.',
+      data: { classSection }
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 // Enrollments & CSV Import
 async function listEnrollments(req, res, next) {
   try {
@@ -1246,7 +1289,7 @@ async function enrollStudent(req, res, next) {
 
     const classSection = await ClassSection.findByPk(classId, {
       include: [
-        { model: CourseOffering, as: 'courseOffering', include: [{ model: Course, as: 'course' }] },
+        { model: CourseOffering, as: 'courseOffering', include: [{ model: Course, as: 'course' }, { model: Semester, as: 'semester' }] },
         { model: ClassMembership, as: 'memberships' }
       ],
       transaction: t
@@ -1254,8 +1297,34 @@ async function enrollStudent(req, res, next) {
 
     if (!classSection) throw new AppError('Class section not found.', 404);
 
-    if (req.user.primaryRole === 'student' && classSection.courseOffering?.enrollmentPolicy === 'admin_only') {
-      throw new AppError('This class section requires administrator enrollment.', 403, 'ENROLLMENT_RESTRICTED');
+    const offering = classSection.courseOffering;
+    if (req.user.primaryRole === 'student') {
+      if (classSection.status !== 'active' || offering?.status !== 'published') {
+        throw new AppError('This class is not currently open for enrollment.', 400, 'ENROLLMENT_CLOSED');
+      }
+      if (offering?.enrollmentPolicy === 'admin_only') {
+        throw new AppError('This class section requires administrator enrollment.', 403, 'ENROLLMENT_RESTRICTED');
+      }
+
+      const semester = offering?.semester;
+      const currentDate = new Date().toISOString().slice(0, 10);
+      if (
+        (semester?.enrollmentStartDate && currentDate < semester.enrollmentStartDate) ||
+        (semester?.enrollmentEndDate && currentDate > semester.enrollmentEndDate)
+      ) {
+        throw new AppError('Enrollment for this term is not currently open.', 400, 'ENROLLMENT_WINDOW_CLOSED');
+      }
+    }
+
+    const placement = await StudentPlacement.findOne({
+      where: { studentId, academicYearId: offering?.academicYearId },
+      transaction: t
+    });
+    if (!placement) {
+      throw new AppError('Student academic placement is not set for this year. Contact the registrar.', 403, 'PLACEMENT_REQUIRED');
+    }
+    if (!isPlacementEligibleForSection(placement, classSection)) {
+      throw new AppError('Student is not eligible for this class section based on their academic placement.', 403, 'SECTION_NOT_ELIGIBLE');
     }
 
     const existing = await ClassMembership.findOne({
@@ -1340,6 +1409,21 @@ async function transferStudentSection(req, res, next) {
     });
 
     if (!current) throw new AppError('Source enrollment record not found.', 404);
+
+    const targetClass = await ClassSection.findByPk(toClassId, {
+      include: [{ model: CourseOffering, as: 'courseOffering' }],
+      transaction: t
+    });
+    if (!targetClass) throw new AppError('Target class section not found.', 404);
+
+    const placement = await StudentPlacement.findOne({
+      where: { studentId: Number(studentId), academicYearId: targetClass.courseOffering?.academicYearId },
+      transaction: t
+    });
+    if (!placement) throw new AppError('Student academic placement is not set for this year.', 403, 'PLACEMENT_REQUIRED');
+    if (!isPlacementEligibleForSection(placement, targetClass)) {
+      throw new AppError('Student is not eligible for the target class section.', 403, 'SECTION_NOT_ELIGIBLE');
+    }
 
     await current.update({ status: 'transferred', remarks: `Transferred to class #${toClassId}` }, { transaction: t });
 
@@ -1569,6 +1653,162 @@ async function updateEnrollmentStatus(req, res, next) {
   }
 }
 
+async function listStudentPlacements(req, res, next) {
+  try {
+    const where = {};
+    if (req.query.academicYearId) where.academicYearId = Number(req.query.academicYearId);
+    if (req.query.studentId) where.studentId = Number(req.query.studentId);
+    if (req.user.primaryRole === 'student') where.studentId = req.user.id;
+
+    const placements = await StudentPlacement.findAll({
+      where,
+      include: [
+        { model: User, as: 'student', attributes: ['id', 'firstName', 'lastName', 'email', 'studentNumber'] },
+        { model: AcademicYear, as: 'academicYear', attributes: ['id', 'name', 'isCurrent'] },
+        { model: Program, as: 'program', attributes: ['id', 'code', 'name'] }
+      ],
+      order: [['academicYearId', 'DESC'], ['studentId', 'ASC']]
+    });
+
+    return res.status(200).json({ success: true, data: { placements } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function setStudentPlacement(req, res, next) {
+  const transaction = await sequelize.transaction();
+  try {
+    const payload = studentPlacementSchema.parse(req.body);
+    const [student, academicYear, program] = await Promise.all([
+      User.findByPk(payload.studentId, {
+        include: [{ model: Role, as: 'roles', where: { slug: 'student' }, required: true }]
+      }),
+      AcademicYear.findByPk(payload.academicYearId),
+      Program.findByPk(payload.programId)
+    ]);
+    if (!student) throw new AppError('Student not found or user is not a student.', 404, 'STUDENT_NOT_FOUND');
+    if (!academicYear) throw new AppError('Academic year not found.', 404, 'ACADEMIC_YEAR_NOT_FOUND');
+    if (!program || program.status !== 'active') throw new AppError('Program not found or inactive.', 404, 'PROGRAM_NOT_FOUND');
+
+    const [placement, created] = await StudentPlacement.findOrCreate({
+      where: { studentId: payload.studentId, academicYearId: payload.academicYearId },
+      defaults: { ...payload, updatedBy: req.user.id },
+      transaction
+    });
+    if (!created) {
+      await placement.update({ ...payload, updatedBy: req.user.id }, { transaction });
+    }
+    await transaction.commit();
+
+    await recordAudit({
+      req,
+      action: 'STUDENT_PLACEMENT_CREATED',
+      category: 'academic',
+      entityType: 'StudentPlacement',
+      entityId: placement.id,
+      metadata: payload
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Student placement set successfully.',
+      data: { placement }
+    });
+  } catch (err) {
+    if (!transaction.finished) await transaction.rollback();
+    return next(err);
+  }
+}
+
+async function enrollEligibleStudents(req, res, next) {
+  const transaction = await sequelize.transaction();
+  try {
+    const classId = Number(req.params.id);
+    const classSection = await ClassSection.findByPk(classId, {
+      include: [{ model: CourseOffering, as: 'courseOffering' }],
+      transaction
+    });
+    if (!classSection) throw new AppError('Class section not found.', 404, 'CLASS_NOT_FOUND');
+    if (!classSection.eligibleProgramId || !classSection.eligibleYearLevel) {
+      throw new AppError('Set an eligible program and year level before enrolling a cohort.', 400, 'COHORT_RULES_REQUIRED');
+    }
+
+    const placementWhere = {
+      academicYearId: classSection.courseOffering.academicYearId,
+      programId: classSection.eligibleProgramId,
+      yearLevel: classSection.eligibleYearLevel
+    };
+    if (classSection.eligibleCohortSection) placementWhere.cohortSection = classSection.eligibleCohortSection;
+    const placements = await StudentPlacement.findAll({ where: placementWhere, transaction });
+    const students = placements.length
+      ? await User.findAll({
+        where: { id: placements.map((placement) => placement.studentId), status: 'active' },
+        include: [{ model: Role, as: 'roles', where: { slug: 'student' }, required: true }],
+        order: [['id', 'ASC']],
+        transaction
+      })
+      : [];
+    const existingMemberships = await ClassMembership.findAll({
+      where: { classId },
+      transaction
+    });
+    const membershipsByStudent = new Map(existingMemberships.map((membership) => [membership.studentId, membership]));
+    const candidates = students.filter((student) => {
+      const membership = membershipsByStudent.get(student.id);
+      return !membership || ['dropped', 'transferred'].includes(membership.status);
+    });
+    const activeMembershipCount = existingMemberships.filter(
+      (membership) => ['enrolled', 'pending'].includes(membership.status)
+    ).length;
+    const capacityAvailable = Math.max(0, classSection.capacity - activeMembershipCount);
+    const studentsToEnroll = candidates.slice(0, capacityAvailable);
+    const now = new Date();
+
+    for (const student of studentsToEnroll) {
+      const [membership, created] = await ClassMembership.findOrCreate({
+        where: { classId, studentId: student.id },
+        defaults: { classId, studentId: student.id, status: 'enrolled', enrolledBy: req.user.id },
+        transaction
+      });
+      if (!created && membership.status !== 'enrolled') {
+        await membership.update({ status: 'enrolled', enrolledAt: now, enrolledBy: req.user.id }, { transaction });
+      }
+    }
+
+    await transaction.commit();
+
+    for (const student of studentsToEnroll) {
+      await recalculateStudentCourseProgress(classId, student.id);
+      await createNotification({
+        userId: student.id,
+        type: 'enrollment',
+        title: `Enrolled in ${classSection.name}`,
+        message: `You have been enrolled in ${classSection.name}.`,
+        destinationUrl: '/student/courses'
+      });
+    }
+
+    await recordAudit({
+      req,
+      action: 'STUDENT_COHORT_ENROLLED',
+      category: 'academic',
+      entityType: 'ClassSection',
+      entityId: classId,
+      metadata: { enrolledCount: studentsToEnroll.length }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Enrolled ${studentsToEnroll.length} eligible student(s) into ${classSection.name}.`,
+      data: { enrolledCount: studentsToEnroll.length }
+    });
+  } catch (err) {
+    if (!transaction.finished) await transaction.rollback();
+    return next(err);
+  }
+}
+
 module.exports = {
   getInstitution,
   updateInstitution,
@@ -1605,9 +1845,13 @@ module.exports = {
   createClassSection,
   updateClassSection,
   deleteClassSection,
+  updateClassEligibility,
   assignInstructorToClass,
   assignTaToClass,
   listEnrollments,
+  listStudentPlacements,
+  setStudentPlacement,
+  enrollEligibleStudents,
   enrollStudent,
   dropStudent,
   updateEnrollmentStatus,
