@@ -187,6 +187,47 @@ export function AcademicDashboardPage() {
             ))}
           </tbody>
         </table>
+
+        {/* ── Table pagination footer ────────────────────────────────────── */}
+        <div className="flex flex-col sm:flex-row items-center justify-between px-5 py-3 border-t border-slate-200 text-xs text-slate-500 gap-3 bg-slate-50/50">
+          <div className="flex items-center gap-2">
+            <span>Rows per page:</span>
+            <select
+              value={progRowsPerPage}
+              onChange={(e) => {
+                setProgRowsPerPage(Number(e.target.value));
+                setProgPage(1);
+              }}
+              className="px-2 py-1 rounded border border-slate-300 bg-white text-xs font-semibold focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+            </select>
+          </div>
+          <div>
+            Showing {startIdx}–{endIdx} of {totalPrograms} programs
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={currentPage <= 1}
+              onClick={() => setProgPage((p) => Math.max(1, p - 1))}
+              className="px-2.5 py-1 border border-slate-300 rounded text-slate-700 font-semibold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              &lt; Prev
+            </button>
+            <span className="font-semibold text-slate-700">Page {currentPage} of {totalPages}</span>
+            <button
+              type="button"
+              disabled={currentPage >= totalPages}
+              onClick={() => setProgPage((p) => Math.min(totalPages, p + 1))}
+              className="px-2.5 py-1 border border-slate-300 rounded text-slate-700 font-semibold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next &gt;
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ── Classes at a glance + Recent announcements ────────────────────── */}
@@ -293,6 +334,10 @@ export function DepartmentsAndProgramsPage() {
   const [deletingDeptId, setDeletingDeptId] = useState(null);
   const [deletingProgId, setDeletingProgId] = useState(null);
 
+  // ── Pagination state ──────────────────────────────────────────────────────
+  const [progPage, setProgPage] = useState(1);
+  const [progRowsPerPage, setProgRowsPerPage] = useState(5);
+
   const { data: deptData, isLoading } = useQuery({
     queryKey: ['departments'],
     queryFn: lmsApi.listDepartments
@@ -304,6 +349,13 @@ export function DepartmentsAndProgramsPage() {
 
   const departments = deptData?.data?.departments || [];
   const programs    = progData?.data?.programs    || [];
+
+  const totalPrograms = programs.length;
+  const totalPages = Math.max(1, Math.ceil(totalPrograms / progRowsPerPage));
+  const currentPage = Math.min(progPage, totalPages);
+  const paginatedPrograms = programs.slice((currentPage - 1) * progRowsPerPage, currentPage * progRowsPerPage);
+  const startIdx = totalPrograms === 0 ? 0 : (currentPage - 1) * progRowsPerPage + 1;
+  const endIdx = Math.min(currentPage * progRowsPerPage, totalPrograms);
 
   // Auto-select first department in program create form
   React.useEffect(() => {
@@ -466,7 +518,7 @@ export function DepartmentsAndProgramsPage() {
             {programs.length === 0 && (
               <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">No programs configured yet.</td></tr>
             )}
-            {programs.map((p) => (
+            {paginatedPrograms.map((p) => (
               <tr key={p.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-mono font-bold text-blue-700">{p.code}</td>
                 <td className="px-4 py-3 font-semibold text-slate-900">{p.name}</td>

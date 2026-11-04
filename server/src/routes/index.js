@@ -55,6 +55,7 @@ router.get('/users', requireAuth, requirePermission('users:read'), iamCtrl.listU
 router.get('/users/:id', requireAuth, requirePermission('users:read'), iamCtrl.getUserById);
 router.post('/users', requireAuth, requirePermission('users:write'), iamCtrl.createUser);
 router.put('/users/:id', requireAuth, requirePermission('users:write'), iamCtrl.updateUser);
+router.delete('/users/:id', requireAuth, requireRole('super_admin'), iamCtrl.deleteUser);
 
 router.get('/roles', requireAuth, iamCtrl.listRolesAndPermissions);
 router.put('/roles/:id/permissions', requireAuth, requirePermission('roles:manage'), iamCtrl.updateRolePermissions);
@@ -110,6 +111,8 @@ router.put('/classes/:id', requireAuth, requirePermission('classes:manage'), aca
 router.delete('/classes/:id', requireAuth, requirePermission('classes:manage'), acadCtrl.deleteClassSection);
 router.post('/classes/:id/instructors', requireAuth, requirePermission('classes:manage'), acadCtrl.assignInstructorToClass);
 router.post('/classes/:id/teaching-assistants', requireAuth, requirePermission('classes:manage'), acadCtrl.assignTaToClass);
+router.put('/classes/:id/eligibility', requireAuth, requirePermission('classes:manage'), acadCtrl.updateClassEligibility);
+router.post('/classes/:id/enroll-eligible', requireAuth, requirePermission('classes:manage'), acadCtrl.enrollEligibleStudents);
 
 router.get('/enrollments', requireAuth, acadCtrl.listEnrollments);
 router.post('/enrollments', requireAuth, acadCtrl.enrollStudent);
@@ -117,6 +120,11 @@ router.delete('/enrollments/:id', requireAuth, requirePermission('enrollments:ma
 router.patch('/enrollments/:id/status', requireAuth, requirePermission('enrollments:manage'), acadCtrl.updateEnrollmentStatus);
 router.post('/enrollments/transfer', requireAuth, requirePermission('enrollments:manage'), acadCtrl.transferStudentSection);
 router.post('/enrollments/import-csv', requireAuth, requirePermission('enrollments:manage'), acadCtrl.importRecordsCsv);
+
+router.get('/student/placements', requireAuth, requireRole('student'), acadCtrl.listStudentPlacements);
+router.get('/student-placements', requireAuth, requirePermission('users:read'), acadCtrl.listStudentPlacements);
+router.post('/student-placements', requireAuth, requirePermission('classes:manage'), acadCtrl.setStudentPlacement);
+router.put('/student-placements', requireAuth, requirePermission('classes:manage'), acadCtrl.setStudentPlacement);
 
 // 6. Content (/api/modules, /api/lessons, /api/resources, /api/progress)
 router.get('/modules', requireAuth, contentCtrl.listModules);
@@ -127,6 +135,7 @@ router.put('/modules/:id', requireAuth, requirePermission('content:manage'), con
 router.get('/lessons/:id', requireAuth, contentCtrl.getLessonById);
 router.post('/lessons', requireAuth, requirePermission('content:manage'), contentCtrl.createLesson);
 router.put('/lessons/:id', requireAuth, requirePermission('content:manage'), contentCtrl.updateLesson);
+router.delete('/lessons/:id', requireAuth, requirePermission('content:manage'), contentCtrl.deleteLesson);
 
 router.get('/resources', requireAuth, contentCtrl.listResources);
 router.post('/resources', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), uploadMiddleware.single('file'), contentCtrl.createResource);
@@ -139,6 +148,8 @@ router.get('/progress', requireAuth, contentCtrl.getProgressAnalytics);
 router.get('/assignments', requireAuth, assessCtrl.listAssignments);
 router.get('/assignments/:id', requireAuth, assessCtrl.getAssignmentById);
 router.post('/assignments', requireAuth, requirePermission('assignments:manage'), assessCtrl.createAssignment);
+router.put('/assignments/:id', requireAuth, requirePermission('assignments:manage'), assessCtrl.updateAssignment);
+router.delete('/assignments/:id', requireAuth, requirePermission('assignments:manage'), assessCtrl.deleteAssignment);
 
 router.get('/submissions', requireAuth, assessCtrl.listSubmissions);
 router.post('/submissions', requireAuth, uploadMiddleware.single('file'), assessCtrl.submitAssignmentWork);
@@ -148,9 +159,13 @@ router.put('/submissions/:id/review', requireAuth, requirePermission('submission
 router.get('/question-banks', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), assessCtrl.listQuestionBanks);
 router.post('/question-banks', requireAuth, requirePermission('questions:manage'), assessCtrl.createQuestionBank);
 router.post('/questions', requireAuth, requirePermission('questions:manage'), assessCtrl.createQuestion);
+router.put('/questions/:id', requireAuth, requirePermission('questions:manage'), assessCtrl.updateQuestion);
+router.delete('/questions/:id', requireAuth, requirePermission('questions:manage'), assessCtrl.deleteQuestion);
 
 router.get('/assessments', requireAuth, assessCtrl.listAssessments);
 router.post('/assessments', requireAuth, requirePermission('assessments:manage'), assessCtrl.createAssessment);
+router.put('/assessments/:id', requireAuth, requirePermission('assessments:manage'), assessCtrl.updateAssessment);
+router.delete('/assessments/:id', requireAuth, requirePermission('assessments:manage'), assessCtrl.deleteAssessment);
 router.post('/assessments/:id/start', requireAuth, assessCtrl.startOrResumeAttempt);
 
 router.put('/assessment-attempts/:attemptId/save', requireAuth, assessCtrl.saveAttemptAnswers);
