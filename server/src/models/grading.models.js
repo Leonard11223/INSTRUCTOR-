@@ -90,11 +90,37 @@ module.exports = (sequelize) => {
     ]
   });
 
+  // ── Attendance ────────────────────────────────────────────
+  const AttendanceSession = sequelize.define('AttendanceSession', {
+    id:        { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    classId:   { type: DataTypes.INTEGER, allowNull: false, field: 'class_id' },
+    sessionDate: { type: DataTypes.DATEONLY, allowNull: false, field: 'session_date' },
+    topic:     { type: DataTypes.STRING(255), allowNull: true },
+    createdBy: { type: DataTypes.INTEGER, allowNull: true, field: 'created_by' }
+  }, {
+    tableName: 'attendance_sessions',
+    indexes: [{ fields: ['class_id', 'session_date'] }]
+  });
+
+  const AttendanceRecord = sequelize.define('AttendanceRecord', {
+    id:          { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    sessionId:   { type: DataTypes.INTEGER, allowNull: false, field: 'session_id' },
+    classId:     { type: DataTypes.INTEGER, allowNull: false, field: 'class_id' },
+    studentId:   { type: DataTypes.INTEGER, allowNull: false, field: 'student_id' },
+    status:      { type: DataTypes.ENUM('present','absent','late','excused'), defaultValue: 'present' },
+    remarks:     { type: DataTypes.STRING(255), allowNull: true }
+  }, {
+    tableName: 'attendance_records',
+    indexes: [{ fields: ['session_id', 'student_id'], unique: true }]
+  });
+
   return {
     GradeCategory,
     Grade,
     GradeHistory,
-    Certificate
+    Certificate,
+    AttendanceSession,
+    AttendanceRecord
   };
 };
 

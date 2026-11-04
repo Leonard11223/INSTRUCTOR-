@@ -883,6 +883,77 @@ async function generateReport(req, res, next) {
   }
 }
 
+// ============================================================================
+// BULK GRADE IMPORT via CSV
+// ============================================================================
+async function importGradesCsv(req, res, next) {
+  const t = await sequelize.transaction();
+  try {
+    const classId = Number(req.params.classId);
+    await verifyClassAccess(req.user, classId, { allowAdmin: false, allowInstructor: true });
+
+    if (!req.file) throw new AppError('CSV file is required.', 400);
+
+    const { gradeCategoryId } = req.body;
+    if (!gradeCategoryId) throw new AppError('gradeCategoryId is required.', 400);
+
+    // Parse CSV (simple: studentNumber,score,feedback)
+    const fs = require('fs');
+    const content = fs.readFileSync(req.file.path, 'utf-8');
+    const lines = content.split('\n').filter(l => l.trim() && !l.trim().startsWith('studentNumber'));
+
+    const results = [];
+    const errors = [];
+
+    for (const line of lines) {
+      const parts = line.split(',');
+      const studentNumber = parts[0]?.trim();
+      const score = parseFloat(parts[1]?.trim());
+      const feedback = parts[2]?.trim() || null;
+
+      if (!studentNumber || isNaN(score)) { errors.push(`Skipped: ${line}`); continue; }
+
+      const student = await User.findOne({ where: { studentNumber } });
+      if (!student) { errors.push(`Student not found: ${studentNumber}`); continue; }
+
+      const membership = await ClassMembership.findOne({ where: { classId, studentId: student.id } });
+      if (!membership) { errors.push(`Not enrolled: ${studentNumber}`); continue; }
+
+      const grade = await upsertGradeWithHistory({
+        classId,
+        gradeCategoryId: Number(gradeCategoryId),
+        studentId: student.id,
+        sourceType: 'manual',
+        itemTitle: 'CSV Import',
+        score,
+        maxScore: 100,
+        feedback,
+        status: 'published',
+        actorId: req.user.id,
+        reason: 'Bulk CSV grade import',
+        transaction: t
+      });
+      results.push({ studentNumber, score, gradeId: grade.id });
+    }
+
+    fs.unlinkSync(req.file.path);
+    await t.commit();
+
+    await recordAudit({ req, action: 'GRADES_IMPORTED_CSV', category: 'grade',
+      entityType: 'ClassSection', entityId: classId,
+      metadata: { imported: results.length, errors: errors.length } });
+
+    return res.status(200).json({
+      success: true,
+      message: `Imported ${results.length} grades. ${errors.length} skipped.`,
+      data: { imported: results, errors }
+    });
+  } catch (err) {
+    await t.rollback();
+    return next(err);
+  }
+}
+
 module.exports = {
   getClassGradebookView,
   getStudentPersonalGrades,
@@ -893,6 +964,7 @@ module.exports = {
   listCertificates,
   verifyCertificate,
   issueCertificateManually,
-  generateReport
+  generateReport,
+  importGradesCsv
 };
 

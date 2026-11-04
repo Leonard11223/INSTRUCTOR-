@@ -1219,6 +1219,41 @@ async function deleteQuestion(req, res, next) {
   }
 }
 
+// ============================================================================
+// ASSIGNMENT EXTENSION (per-student due-date override)
+// ============================================================================
+async function extendAssignmentForStudent(req, res, next) {
+  try {
+    const assignmentId = Number(req.params.id);
+    const { studentId, newDueDate, reason } = req.body;
+    if (!studentId || !newDueDate) throw new AppError('studentId and newDueDate are required.', 400);
+
+    const assignment = await Assignment.findByPk(assignmentId);
+    if (!assignment) throw new AppError('Assignment not found.', 404);
+    await verifyClassAccess(req.user, assignment.classId, { allowAdmin: true, allowInstructor: true });
+
+    // Store extension as a special submission-level override.
+    // We use a lightweight approach: find or create a draft submission and set a custom field.
+    // Since the Assignment model may not have per-student overrides, we record it in a
+    // dedicated JSON field on the assignment (extensions array).
+    const existing = assignment.extensionOverrides ? JSON.parse(assignment.extensionOverrides) : [];
+    const filtered = existing.filter(e => e.studentId !== Number(studentId));
+    filtered.push({ studentId: Number(studentId), newDueDate, reason: reason || null, grantedBy: req.user.id, grantedAt: new Date() });
+
+    await assignment.update({ extensionOverrides: JSON.stringify(filtered) });
+
+    await recordAudit({ req, action: 'ASSIGNMENT_EXTENSION_GRANTED', category: 'assessment',
+      entityType: 'Assignment', entityId: assignmentId,
+      metadata: { studentId, newDueDate } });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Due date extension granted.',
+      data: { extensions: filtered }
+    });
+  } catch (err) { return next(err); }
+}
+
 module.exports = {
   listAssignments,
   getAssignmentById,
@@ -1240,6 +1275,7 @@ module.exports = {
   startOrResumeAttempt,
   saveAttemptAnswers,
   submitAttempt,
-  manualGradeAttempt
+  manualGradeAttempt,
+  extendAssignmentForStudent
 };
 

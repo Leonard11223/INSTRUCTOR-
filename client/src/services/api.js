@@ -34,7 +34,7 @@ export function extractErrorMessage(err) {
 }
 
 export const lmsApi = {
-  // Auth
+  // ── Auth ──────────────────────────────────────────────────────────────────
   login: (data) => apiClient.post('/auth/login', data).then((r) => r.data),
   logout: () => apiClient.post('/auth/logout').then((r) => r.data),
   getMe: () => apiClient.get('/auth/me').then((r) => r.data),
@@ -43,14 +43,15 @@ export const lmsApi = {
   changePassword: (data) => apiClient.put('/auth/change-password', data).then((r) => r.data),
   updateProfile: (data) => apiClient.put('/auth/profile', data).then((r) => r.data),
 
-  // Dashboard
+  // ── Dashboard ─────────────────────────────────────────────────────────────
   getDashboardSummary: () => apiClient.get('/dashboards/summary').then((r) => r.data),
 
-  // IAM & System
+  // ── IAM & System ──────────────────────────────────────────────────────────
   listUsers: (params) => apiClient.get('/users', { params }).then((r) => r.data),
   getUserById: (id) => apiClient.get(`/users/${id}`).then((r) => r.data),
   createUser: (data) => apiClient.post('/users', data).then((r) => r.data),
   updateUser: (id, data) => apiClient.put(`/users/${id}`, data).then((r) => r.data),
+  deleteUser: (id) => apiClient.delete(`/users/${id}`).then((r) => r.data),
   listRoles: () => apiClient.get('/roles').then((r) => r.data),
   updateRolePermissions: (id, permissionCodes) =>
     apiClient.put(`/roles/${id}/permissions`, { permissionCodes }).then((r) => r.data),
@@ -58,7 +59,7 @@ export const lmsApi = {
   updateSetting: (key, data) => apiClient.put(`/settings/${key}`, data).then((r) => r.data),
   listAuditLogs: (params) => apiClient.get('/audit-logs', { params }).then((r) => r.data),
 
-  // Academic Management
+  // ── Academic Management ───────────────────────────────────────────────────
   getPublicCatalog: () => apiClient.get('/public/catalog').then((r) => r.data),
   getInstitution: () => apiClient.get('/institutions').then((r) => r.data),
   updateInstitution: (data) => apiClient.put('/institutions', data).then((r) => r.data),
@@ -69,65 +70,69 @@ export const lmsApi = {
   listPrograms: () => apiClient.get('/programs').then((r) => r.data),
   createProgram: (data) => apiClient.post('/programs', data).then((r) => r.data),
   updateProgram: (id, data) => apiClient.put(`/programs/${id}`, data).then((r) => r.data),
-  deleteProgram: (id) => apiClient.delete(`/programs/${id}`).then((r) => r.data),
   listAcademicYears: (params) => apiClient.get('/academic-years', { params }).then((r) => r.data),
   createAcademicYear: (data) => apiClient.post('/academic-years', data).then((r) => r.data),
-  updateAcademicYear: (id, data) => apiClient.put(`/academic-years/${id}`, data).then((r) => r.data),
-  deleteAcademicYear: (id) => apiClient.delete(`/academic-years/${id}`).then((r) => r.data),
   listSemesters: (params) => apiClient.get('/semesters', { params }).then((r) => r.data),
   createSemester: (data) => apiClient.post('/semesters', data).then((r) => r.data),
-  updateSemester: (id, data) => apiClient.put(`/semesters/${id}`, data).then((r) => r.data),
-  deleteSemester: (id) => apiClient.delete(`/semesters/${id}`).then((r) => r.data),
 
-  // Courses, Offerings, Classes, Enrollments
+  // ── Courses, Offerings, Classes, Enrollments ──────────────────────────────
   listCourses: (params) => apiClient.get('/courses', { params }).then((r) => r.data),
   getCourseById: (id) => apiClient.get(`/courses/${id}`).then((r) => r.data),
   createCourse: (data) => apiClient.post('/courses', data).then((r) => r.data),
   updateCourse: (id, data) => apiClient.put(`/courses/${id}`, data).then((r) => r.data),
-  deleteCourse: (id) => apiClient.delete(`/courses/${id}`).then((r) => r.data),
   listOfferings: () => apiClient.get('/course-offerings').then((r) => r.data),
   createOffering: (data) => apiClient.post('/course-offerings', data).then((r) => r.data),
   updateOffering: (id, data) => apiClient.put(`/course-offerings/${id}`, data).then((r) => r.data),
-  deleteOffering: (id) => apiClient.delete(`/course-offerings/${id}`).then((r) => r.data),
   listClasses: () => apiClient.get('/classes').then((r) => r.data),
   getClassById: (id) => apiClient.get(`/classes/${id}`).then((r) => r.data),
   createClass: (data) => apiClient.post('/classes', data).then((r) => r.data),
-  updateClass: (id, data) => apiClient.put(`/classes/${id}`, data).then((r) => r.data),
-  deleteClass: (id) => apiClient.delete(`/classes/${id}`).then((r) => r.data),
   assignInstructor: (classId, data) => apiClient.post(`/classes/${classId}/instructors`, data).then((r) => r.data),
   assignTa: (classId, data) => apiClient.post(`/classes/${classId}/teaching-assistants`, data).then((r) => r.data),
   listEnrollments: (params) => apiClient.get('/enrollments', { params }).then((r) => r.data),
   enrollStudent: (data) => apiClient.post('/enrollments', data).then((r) => r.data),
-  dropStudent: (id, data) => apiClient.delete(`/enrollments/${id}`, { data }).then((r) => r.data),
-  updateEnrollmentStatus: (id, data) => apiClient.patch(`/enrollments/${id}/status`, data).then((r) => r.data),
   transferStudent: (data) => apiClient.post('/enrollments/transfer', data).then((r) => r.data),
   importCsv: (data) => apiClient.post('/enrollments/import-csv', data).then((r) => r.data),
 
-  // Content & Progress
+  // ── Content & Progress ────────────────────────────────────────────────────
   listModules: (params) => apiClient.get('/modules', { params }).then((r) => r.data),
   createModule: (data) => apiClient.post('/modules', data).then((r) => r.data),
+  updateModule: (id, data) => apiClient.put(`/modules/${id}`, data).then((r) => r.data),
+  deleteModule: (id) => apiClient.delete(`/modules/${id}`).then((r) => r.data),
   getLessonById: (id) => apiClient.get(`/lessons/${id}`).then((r) => r.data),
   createLesson: (data) => apiClient.post('/lessons', data).then((r) => r.data),
   updateLesson: (id, data) => apiClient.put(`/lessons/${id}`, data).then((r) => r.data),
+  deleteLesson: (id) => apiClient.delete(`/lessons/${id}`).then((r) => r.data),
   listResources: (params) => apiClient.get('/resources', { params }).then((r) => r.data),
   createResource: (formData) =>
     apiClient.post('/resources', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data),
   updateLessonProgress: (data) => apiClient.post('/progress/lessons', data).then((r) => r.data),
   getProgressAnalytics: (params) => apiClient.get('/progress', { params }).then((r) => r.data),
 
-  // Assignments, Submissions, Question Banks, Assessments
+  // ── Assignments ───────────────────────────────────────────────────────────
   listAssignments: (params) => apiClient.get('/assignments', { params }).then((r) => r.data),
   getAssignmentById: (id) => apiClient.get(`/assignments/${id}`).then((r) => r.data),
   createAssignment: (data) => apiClient.post('/assignments', data).then((r) => r.data),
+  updateAssignment: (id, data) => apiClient.put(`/assignments/${id}`, data).then((r) => r.data),
+  deleteAssignment: (id) => apiClient.delete(`/assignments/${id}`).then((r) => r.data),
+
+  // ── Submissions ───────────────────────────────────────────────────────────
   listSubmissions: (params) => apiClient.get('/submissions', { params }).then((r) => r.data),
   submitAssignment: (assignmentId, data) =>
     apiClient.post(`/assignments/${assignmentId}/submit`, data).then((r) => r.data),
   reviewSubmission: (id, data) => apiClient.put(`/submissions/${id}/review`, data).then((r) => r.data),
+
+  // ── Question Banks & Questions ────────────────────────────────────────────
   listQuestionBanks: (params) => apiClient.get('/question-banks', { params }).then((r) => r.data),
   createQuestionBank: (data) => apiClient.post('/question-banks', data).then((r) => r.data),
   createQuestion: (data) => apiClient.post('/questions', data).then((r) => r.data),
+  updateQuestion: (id, data) => apiClient.put(`/questions/${id}`, data).then((r) => r.data),
+  deleteQuestion: (id) => apiClient.delete(`/questions/${id}`).then((r) => r.data),
+
+  // ── Assessments ───────────────────────────────────────────────────────────
   listAssessments: (params) => apiClient.get('/assessments', { params }).then((r) => r.data),
   createAssessment: (data) => apiClient.post('/assessments', data).then((r) => r.data),
+  updateAssessment: (id, data) => apiClient.put(`/assessments/${id}`, data).then((r) => r.data),
+  deleteAssessment: (id) => apiClient.delete(`/assessments/${id}`).then((r) => r.data),
   startAttempt: (assessmentId) => apiClient.post(`/assessments/${assessmentId}/start`).then((r) => r.data),
   saveAttemptAnswers: (attemptId, answers) =>
     apiClient.put(`/assessment-attempts/${attemptId}/save`, { answers }).then((r) => r.data),
@@ -136,7 +141,7 @@ export const lmsApi = {
   gradeAttemptManual: (attemptId, data) =>
     apiClient.post(`/assessment-attempts/${attemptId}/grade`, data).then((r) => r.data),
 
-  // Gradebook, Certificates, Reports
+  // ── Gradebook, Certificates, Reports ─────────────────────────────────────
   getPersonalGrades: () => apiClient.get('/grades/personal').then((r) => r.data),
   getClassGradebook: (classId) => apiClient.get(`/grades/class/${classId}`).then((r) => r.data),
   updateGradeCategories: (classId, categories) =>
@@ -152,17 +157,41 @@ export const lmsApi = {
   issueCertificate: (data) => apiClient.post('/certificates/issue', data).then((r) => r.data),
   getReport: (params) => apiClient.get('/reports', { params }).then((r) => r.data),
 
-  // Communication
+  // ── Announcements ─────────────────────────────────────────────────────────
   listAnnouncements: (params) => apiClient.get('/announcements', { params }).then((r) => r.data),
   createAnnouncement: (data) => apiClient.post('/announcements', data).then((r) => r.data),
+  updateAnnouncement: (id, data) => apiClient.put(`/announcements/${id}`, data).then((r) => r.data),
+  deleteAnnouncement: (id) => apiClient.delete(`/announcements/${id}`).then((r) => r.data),
+
+  // ── Discussions ───────────────────────────────────────────────────────────
   listDiscussions: (params) => apiClient.get('/discussions', { params }).then((r) => r.data),
   createDiscussion: (data) => apiClient.post('/discussions', data).then((r) => r.data),
   replyDiscussion: (threadId, data) => apiClient.post(`/discussions/${threadId}/replies`, data).then((r) => r.data),
   updateDiscussionStatus: (threadId, data) =>
     apiClient.put(`/discussions/${threadId}/status`, data).then((r) => r.data),
+  deleteDiscussion: (threadId) => apiClient.delete(`/discussions/${threadId}`).then((r) => r.data),
+  endorseDiscussionPost: (postId) => apiClient.put(`/discussions/posts/${postId}/endorse`).then((r) => r.data),
+
+  // ── Attendance ────────────────────────────────────────────────────────────
+  listAttendanceSessions: (params) => apiClient.get('/attendance/sessions', { params }).then((r) => r.data),
+  createAttendanceSession: (data) => apiClient.post('/attendance/sessions', data).then((r) => r.data),
+  saveAttendanceRecords: (sessionId, records) =>
+    apiClient.put(`/attendance/sessions/${sessionId}/records`, { records }).then((r) => r.data),
+  updateAttendanceRecord: (recordId, data) =>
+    apiClient.put(`/attendance/records/${recordId}`, data).then((r) => r.data),
+  getAttendanceSummary: (params) => apiClient.get('/attendance/summary', { params }).then((r) => r.data),
+
+  // ── Bulk Grade CSV Import ─────────────────────────────────────────────────
+  importGradesCsv: (classId, formData) =>
+    apiClient.post(`/grades/class/${classId}/import-csv`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data),
+
+  // ── Assignment Extension ──────────────────────────────────────────────────
+  extendAssignment: (assignmentId, data) =>
+    apiClient.post(`/assignments/${assignmentId}/extend`, data).then((r) => r.data),
+
+  // ── Messages & Notifications ──────────────────────────────────────────────
   listMessages: () => apiClient.get('/messages').then((r) => r.data),
   sendMessage: (data) => apiClient.post('/messages', data).then((r) => r.data),
   listNotifications: () => apiClient.get('/notifications').then((r) => r.data),
   markNotificationRead: (id) => apiClient.put(`/notifications/${id}/read`).then((r) => r.data)
 };
-

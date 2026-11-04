@@ -11,6 +11,7 @@ const contentCtrl = require('../controllers/content.controller');
 const assessCtrl = require('../controllers/assessment.controller');
 const gradingCtrl = require('../controllers/grading.controller');
 const commCtrl = require('../controllers/communication.controller');
+const attendCtrl = require('../controllers/attendance.controller');
 
 const router = express.Router();
 
@@ -80,35 +81,25 @@ router.post('/programs', requireAuth, requirePermission('programs:manage'), acad
 router.put('/programs/:id', requireAuth, requirePermission('programs:manage'), acadCtrl.updateProgram);
 router.delete('/programs/:id', requireAuth, requirePermission('programs:manage'), acadCtrl.deleteProgram);
 
-router.get('/academic-years',          requireAuth,                                          acadCtrl.listAcademicYears);
-router.post('/academic-years',         requireAuth, requirePermission('terms:manage'),        acadCtrl.createAcademicYear);
-router.get('/academic-years/:id',      requireAuth,                                          acadCtrl.getAcademicYearById);
-router.put('/academic-years/:id',      requireAuth, requirePermission('terms:manage'),        acadCtrl.updateAcademicYear);
-router.delete('/academic-years/:id',   requireAuth, requirePermission('terms:manage'),        acadCtrl.deleteAcademicYear);
+router.get('/academic-years', requireAuth, acadCtrl.listAcademicYears);
+router.post('/academic-years', requireAuth, requirePermission('terms:manage'), acadCtrl.createAcademicYear);
 
-router.get('/semesters',               requireAuth,                                          acadCtrl.listSemesters);
-router.post('/semesters',              requireAuth, requirePermission('terms:manage'),        acadCtrl.createSemester);
-router.get('/semesters/:id',           requireAuth,                                          acadCtrl.getSemesterById);
-router.put('/semesters/:id',           requireAuth, requirePermission('terms:manage'),        acadCtrl.updateSemester);
-router.delete('/semesters/:id',        requireAuth, requirePermission('terms:manage'),        acadCtrl.deleteSemester);
+router.get('/semesters', requireAuth, acadCtrl.listSemesters);
+router.post('/semesters', requireAuth, requirePermission('terms:manage'), acadCtrl.createSemester);
 
 // 5. Courses, Offerings, Classes, Enrollments
 router.get('/courses', requireAuth, acadCtrl.listCourses);
 router.get('/courses/:id', requireAuth, acadCtrl.getCourseById);
 router.post('/courses', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor'), acadCtrl.createCourse);
 router.put('/courses/:id', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor'), acadCtrl.updateCourse);
-router.delete('/courses/:id', requireAuth, requireRole('super_admin', 'academic_admin'), acadCtrl.deleteCourse);
 
 router.get('/course-offerings', requireAuth, acadCtrl.listCourseOfferings);
 router.post('/course-offerings', requireAuth, requirePermission('courses:manage'), acadCtrl.createCourseOffering);
 router.put('/course-offerings/:id', requireAuth, requirePermission('courses:manage'), acadCtrl.updateCourseOffering);
-router.delete('/course-offerings/:id', requireAuth, requirePermission('courses:manage'), acadCtrl.deleteCourseOffering);
 
 router.get('/classes', requireAuth, acadCtrl.listClasses);
 router.get('/classes/:id', requireAuth, acadCtrl.getClassById);
 router.post('/classes', requireAuth, requirePermission('classes:manage'), acadCtrl.createClassSection);
-router.put('/classes/:id', requireAuth, requirePermission('classes:manage'), acadCtrl.updateClassSection);
-router.delete('/classes/:id', requireAuth, requirePermission('classes:manage'), acadCtrl.deleteClassSection);
 router.post('/classes/:id/instructors', requireAuth, requirePermission('classes:manage'), acadCtrl.assignInstructorToClass);
 router.post('/classes/:id/teaching-assistants', requireAuth, requirePermission('classes:manage'), acadCtrl.assignTaToClass);
 router.put('/classes/:id/eligibility', requireAuth, requirePermission('classes:manage'), acadCtrl.updateClassEligibility);
@@ -116,8 +107,6 @@ router.post('/classes/:id/enroll-eligible', requireAuth, requirePermission('clas
 
 router.get('/enrollments', requireAuth, acadCtrl.listEnrollments);
 router.post('/enrollments', requireAuth, acadCtrl.enrollStudent);
-router.delete('/enrollments/:id', requireAuth, requirePermission('enrollments:manage'), acadCtrl.dropStudent);
-router.patch('/enrollments/:id/status', requireAuth, requirePermission('enrollments:manage'), acadCtrl.updateEnrollmentStatus);
 router.post('/enrollments/transfer', requireAuth, requirePermission('enrollments:manage'), acadCtrl.transferStudentSection);
 router.post('/enrollments/import-csv', requireAuth, requirePermission('enrollments:manage'), acadCtrl.importRecordsCsv);
 
@@ -131,6 +120,7 @@ router.get('/modules', requireAuth, contentCtrl.listModules);
 router.post('/modules', requireAuth, requirePermission('content:manage'), contentCtrl.createModule);
 router.put('/modules/reorder', requireAuth, requirePermission('content:manage'), contentCtrl.reorderModules);
 router.put('/modules/:id', requireAuth, requirePermission('content:manage'), contentCtrl.updateModule);
+router.delete('/modules/:id', requireAuth, requirePermission('content:manage'), contentCtrl.deleteModule);
 
 router.get('/lessons/:id', requireAuth, contentCtrl.getLessonById);
 router.post('/lessons', requireAuth, requirePermission('content:manage'), contentCtrl.createLesson);
@@ -187,23 +177,36 @@ router.post('/certificates/issue', requireAuth, requirePermission('certificates:
 router.get('/reports', requireAuth, requirePermission('reports:export'), gradingCtrl.generateReport);
 
 // 9. Communication (/api/announcements, /api/discussions, /api/messages, /api/notifications)
-router.get('/announcements',           requireAuth,                                              commCtrl.listAnnouncements);
-router.post('/announcements',          requireAuth, requirePermission('announcements:manage'),   commCtrl.createAnnouncement);
-router.get('/announcements/:id',       requireAuth,                                              commCtrl.getAnnouncementById);
-router.put('/announcements/:id',       requireAuth, requirePermission('announcements:manage'),   commCtrl.updateAnnouncement);
-router.delete('/announcements/:id',    requireAuth, requirePermission('announcements:manage'),   commCtrl.deleteAnnouncement);
-router.patch('/announcements/:id/pin', requireAuth, requirePermission('announcements:manage'),   commCtrl.toggleAnnouncementPin);
+router.get('/announcements', requireAuth, commCtrl.listAnnouncements);
+router.post('/announcements', requireAuth, requirePermission('announcements:manage'), commCtrl.createAnnouncement);
+router.put('/announcements/:id', requireAuth, requirePermission('announcements:manage'), commCtrl.updateAnnouncement);
+router.delete('/announcements/:id', requireAuth, requirePermission('announcements:manage'), commCtrl.deleteAnnouncement);
 
 router.get('/discussions', requireAuth, commCtrl.listDiscussions);
 router.post('/discussions', requireAuth, commCtrl.createDiscussionThread);
 router.post('/discussions/:threadId/replies', requireAuth, commCtrl.replyToDiscussionThread);
 router.put('/discussions/:threadId/status', requireAuth, commCtrl.escalateOrResolveDiscussion);
+router.delete('/discussions/:threadId', requireAuth, commCtrl.deleteDiscussionThread);
+router.put('/discussions/posts/:postId/endorse', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), commCtrl.endorseDiscussionPost);
 
 router.get('/messages', requireAuth, commCtrl.listConversations);
 router.post('/messages', requireAuth, commCtrl.startOrSendMessage);
 
 router.get('/notifications', requireAuth, commCtrl.listNotifications);
 router.put('/notifications/:id/read', requireAuth, commCtrl.markNotificationRead);
+
+// 10. Attendance
+router.get('/attendance/sessions', requireAuth, attendCtrl.listSessions);
+router.post('/attendance/sessions', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), attendCtrl.createSession);
+router.put('/attendance/sessions/:sessionId/records', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), attendCtrl.saveSessionRecords);
+router.put('/attendance/records/:recordId', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), attendCtrl.updateRecord);
+router.get('/attendance/summary', requireAuth, attendCtrl.getClassAttendanceSummary);
+
+// 11. Bulk grade import (CSV)
+router.post('/grades/class/:classId/import-csv', requireAuth, requirePermission('gradebook:manage'), uploadMiddleware.single('file'), gradingCtrl.importGradesCsv);
+
+// 12. Assignment extension (per-student due-date override)
+router.post('/assignments/:id/extend', requireAuth, requirePermission('assignments:manage'), assessCtrl.extendAssignmentForStudent);
 
 module.exports = router;
 

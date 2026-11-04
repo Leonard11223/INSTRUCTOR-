@@ -1,4 +1,3 @@
-const { Op } = require('sequelize');
 const {
   sequelize,
   Announcement,
@@ -10,125 +9,46 @@ const {
   Notification,
   ClassMembership,
   ClassSection,
-  CourseOffering,
-  Course,
-  Department,
   User
 } = require('../models');
 const { AppError } = require('../middleware/error.middleware');
 const { verifyClassAccess } = require('../middleware/auth.middleware');
 const { sanitizePlainText } = require('../utils/sanitizer');
 const { createNotification } = require('../utils/notifyUser');
-const { recordAudit } = require('../utils/auditLogger');
-const { createAnnouncementSchema, updateAnnouncementSchema } = require('../validators/schemas');
 
-// ─── Announcement Helpers ────────────────────────────────────────────────────
-
-/** Standard eager-load config reused across list and get. */
-const ANNOUNCEMENT_INCLUDE = [
-  { model: User,         as: 'author',       attributes: ['id', 'firstName', 'lastName', 'email', 'avatarUrl'] },
-  { model: ClassSection, as: 'classSection', attributes: ['id', 'sectionCode', 'name'] },
-  { model: Course,       as: 'course',       attributes: ['id', 'code', 'title'] },
-  { model: Department,   as: 'department',   attributes: ['id', 'code', 'name'] }
-];
-
-/**
- * Fan-out notifications to every user relevant to an announcement's scope.
- * - institution → all active enrolled students
- * - department  → enrolled students whose class belongs to a course in that dept
- * - course      → enrolled students in any class of that course
- * - class       → enrolled students in that specific class
- */
-async function fanOutNotifications(announcement) {
-  const { scope, classId, courseId, departmentId, title, content } = announcement;
-  const notifTitle   = `New Announcement: ${title}`;
-  const notifMessage = content.slice(0, 140);
-  const destUrl      = '/announcements';
-
-  let memberships = [];
-
-  if (scope === 'institution') {
-    memberships = await ClassMembership.findAll({ where: { status: 'enrolled' } });
-  } else if (scope === 'department' && departmentId) {
-    // Find all class sections whose course offering → course → department matches
-    const classes = await ClassSection.findAll({
-      include: [{
-        model: CourseOffering,
-        as: 'courseOffering',
-        include: [{ model: Course, as: 'course', where: { departmentId }, attributes: ['id'] }],
-        attributes: ['id']
-      }]
-    });
-    const classIds = classes.map((c) => c.id);
-    if (classIds.length) {
-      memberships = await ClassMembership.findAll({ where: { classId: classIds, status: 'enrolled' } });
-    }
-  } else if (scope === 'course' && courseId) {
-    const offerings = await CourseOffering.findAll({ where: { courseId }, attributes: ['id'] });
-    const offeringIds = offerings.map((o) => o.id);
-    if (offeringIds.length) {
-      const classes = await ClassSection.findAll({ where: { courseOfferingId: offeringIds }, attributes: ['id'] });
-      const classIds = classes.map((c) => c.id);
-      if (classIds.length) {
-        memberships = await ClassMembership.findAll({ where: { classId: classIds, status: 'enrolled' } });
-      }
-    }
-  } else if (scope === 'class' && classId) {
-    memberships = await ClassMembership.findAll({ where: { classId, status: 'enrolled' } });
-  }
-
-  // De-duplicate by studentId before firing notifications
-  const seen = new Set();
-  for (const m of memberships) {
-    if (seen.has(m.studentId)) continue;
-    seen.add(m.studentId);
-    await createNotification({
-      userId: m.studentId,
-      type: 'announcement',
-      title: notifTitle,
-      message: notifMessage,
-      destinationUrl: destUrl
-    });
-  }
-}
-
-// ─── Announcements ────────────────────────────────────────────────────────────
-
+// Announcements
 async function listAnnouncements(req, res, next) {
   try {
-    const { scope, classId, courseId, departmentId, priority, isPinned, search } = req.query;
+    const { scope, classId, courseId, showScheduled } = req.query;
     const where = {};
+    if (scope) where.scope = scope;
+    if (classId) where.classId = Number(classId);
+    if (courseId) where.courseId = Number(courseId);
 
-    if (scope)        where.scope        = scope;
-    if (classId)      where.classId      = Number(classId);
-    if (courseId)     where.courseId     = Number(courseId);
-    if (departmentId) where.departmentId = Number(departmentId);
-    if (priority)     where.priority     = priority;
-    if (isPinned !== undefined) where.isPinned = isPinned === 'true';
-
-    // Only surface non-expired announcements unless caller has manage permission
-    const canManage = req.user.permissions.includes('announcements:manage');
-    if (!canManage) {
-      where[Op.or] = [{ expiresAt: null }, { expiresAt: { [Op.gt]: new Date() } }];
+    // Non-admin roles only see published announcements (publishAt <= now)
+    const isAdmin = req.user.roles?.includes('super_admin') || req.user.roles?.includes('academic_admin');
+    const isInstructor = req.user.roles?.includes('instructor');
+    if (!isAdmin && !(isInstructor && showScheduled === 'true')) {
+      where.publishAt = { [require('sequelize').Op.lte]: new Date() };
     }
 
-    // Keyword search across title and content
-    if (search && String(search).trim()) {
-      const term = `%${String(search).trim()}%`;
-      where[Op.and] = [
-        ...(where[Op.and] || []),
-        { [Op.or]: [
-          { title:   { [Op.like]: term } },
-          { content: { [Op.like]: term } }
-        ]}
+    // Filter out expired announcements for non-staff
+    if (!isAdmin && !isInstructor) {
+      where[require('sequelize').Op.or] = [
+        { expiresAt: null },
+        { expiresAt: { [require('sequelize').Op.gt]: new Date() } }
       ];
     }
 
     const announcements = await Announcement.findAll({
       where,
-      include: ANNOUNCEMENT_INCLUDE,
+      include: [
+        { model: User, as: 'author', attributes: ['id', 'firstName', 'lastName', 'email'] },
+        { model: ClassSection, as: 'classSection', attributes: ['id', 'sectionCode', 'name'] }
+      ],
       order: [
-        ['isPinned',  'DESC'],
+        ['isPinned', 'DESC'],
+        ['publishAt', 'DESC'],
         ['createdAt', 'DESC']
       ]
     });
@@ -139,176 +59,60 @@ async function listAnnouncements(req, res, next) {
   }
 }
 
-async function getAnnouncementById(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid announcement ID.', 400);
-
-    const announcement = await Announcement.findByPk(id, { include: ANNOUNCEMENT_INCLUDE });
-    if (!announcement) throw new AppError('Announcement not found.', 404, 'ANNOUNCEMENT_NOT_FOUND');
-
-    return res.status(200).json({ success: true, data: { announcement } });
-  } catch (err) {
-    return next(err);
-  }
-}
-
 async function createAnnouncement(req, res, next) {
   try {
-    const payload = createAnnouncementSchema.parse(req.body);
-
     const {
-      scope, departmentId, courseId, classId,
-      title, content, priority, isPinned, publishAt, expiresAt
-    } = payload;
+      scope = 'class',
+      departmentId,
+      courseId,
+      classId,
+      title,
+      content,
+      priority = 'normal',
+      isPinned = false,
+      expiresAt,
+      publishAt
+    } = req.body;
 
-    // For class-scoped announcements, verify the caller has access to that class
+    if (!title || !content) {
+      throw new AppError('Announcement title and content are required.', 400);
+    }
+
     if (classId) {
       await verifyClassAccess(req.user, classId, { allowAdmin: true, allowInstructor: true });
     }
 
     const announcement = await Announcement.create({
       scope,
-      departmentId: departmentId ?? null,
-      courseId:     courseId     ?? null,
-      classId:      classId      ?? null,
-      title:        sanitizePlainText(title),
-      content:      sanitizePlainText(content),
+      departmentId: departmentId ? Number(departmentId) : null,
+      courseId: courseId ? Number(courseId) : null,
+      classId: classId ? Number(classId) : null,
+      title: sanitizePlainText(title),
+      content: sanitizePlainText(content),
       priority,
-      isPinned:     Boolean(isPinned),
-      publishAt:    publishAt  || new Date(),
-      expiresAt:    expiresAt  || null,
-      authorId:     req.user.id
+      isPinned: Boolean(isPinned),
+      expiresAt: expiresAt || null,
+      publishAt: publishAt ? new Date(publishAt) : new Date(),
+      authorId: req.user.id
     });
 
-    await recordAudit({
-      req,
-      action:     'ANNOUNCEMENT_CREATED',
-      category:   'system',
-      entityType: 'Announcement',
-      entityId:   announcement.id,
-      metadata:   { scope, title: announcement.title, priority }
-    });
-
-    // Fan-out notifications to relevant users
-    await fanOutNotifications(announcement);
-
-    // Re-fetch with associations for the response
-    const full = await Announcement.findByPk(announcement.id, { include: ANNOUNCEMENT_INCLUDE });
+    if (classId) {
+      const members = await ClassMembership.findAll({ where: { classId: Number(classId), status: 'enrolled' } });
+      for (const m of members) {
+        await createNotification({
+          userId: m.studentId,
+          type: 'announcement',
+          title: `New Announcement: ${announcement.title}`,
+          message: announcement.content.slice(0, 140),
+          destinationUrl: '/student/announcements'
+        });
+      }
+    }
 
     return res.status(201).json({
       success: true,
       message: 'Announcement published.',
-      data: { announcement: full }
-    });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-async function updateAnnouncement(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid announcement ID.', 400);
-
-    const announcement = await Announcement.findByPk(id);
-    if (!announcement) throw new AppError('Announcement not found.', 404, 'ANNOUNCEMENT_NOT_FOUND');
-
-    const payload = updateAnnouncementSchema.parse(req.body);
-
-    // If changing to class scope or the announcement already had a classId, verify access
-    const targetClassId = payload.classId ?? announcement.classId;
-    if (targetClassId) {
-      await verifyClassAccess(req.user, targetClassId, { allowAdmin: true, allowInstructor: true });
-    }
-
-    const updates = {};
-    if (payload.title       !== undefined) updates.title       = sanitizePlainText(payload.title);
-    if (payload.content     !== undefined) updates.content     = sanitizePlainText(payload.content);
-    if (payload.priority    !== undefined) updates.priority    = payload.priority;
-    if (payload.isPinned    !== undefined) updates.isPinned    = Boolean(payload.isPinned);
-    if (payload.publishAt   !== undefined) updates.publishAt   = payload.publishAt   || null;
-    if (payload.expiresAt   !== undefined) updates.expiresAt   = payload.expiresAt   || null;
-    if (payload.scope       !== undefined) updates.scope       = payload.scope;
-    if (payload.departmentId !== undefined) updates.departmentId = payload.departmentId ?? null;
-    if (payload.courseId    !== undefined) updates.courseId    = payload.courseId    ?? null;
-    if (payload.classId     !== undefined) updates.classId     = payload.classId     ?? null;
-
-    await announcement.update(updates);
-
-    await recordAudit({
-      req,
-      action:     'ANNOUNCEMENT_UPDATED',
-      category:   'system',
-      entityType: 'Announcement',
-      entityId:   announcement.id,
-      metadata:   { updatedFields: Object.keys(updates) }
-    });
-
-    const full = await Announcement.findByPk(announcement.id, { include: ANNOUNCEMENT_INCLUDE });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Announcement updated.',
-      data: { announcement: full }
-    });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-async function deleteAnnouncement(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid announcement ID.', 400);
-
-    const announcement = await Announcement.findByPk(id);
-    if (!announcement) throw new AppError('Announcement not found.', 404, 'ANNOUNCEMENT_NOT_FOUND');
-
-    await recordAudit({
-      req,
-      action:     'ANNOUNCEMENT_DELETED',
-      category:   'system',
-      entityType: 'Announcement',
-      entityId:   announcement.id,
-      metadata:   { title: announcement.title, scope: announcement.scope }
-    });
-
-    await announcement.destroy();
-
-    return res.status(200).json({
-      success: true,
-      message: 'Announcement deleted.'
-    });
-  } catch (err) {
-    return next(err);
-  }
-}
-
-async function toggleAnnouncementPin(req, res, next) {
-  try {
-    const id = Number(req.params.id);
-    if (!id || Number.isNaN(id)) throw new AppError('Invalid announcement ID.', 400);
-
-    const announcement = await Announcement.findByPk(id);
-    if (!announcement) throw new AppError('Announcement not found.', 404, 'ANNOUNCEMENT_NOT_FOUND');
-
-    const newPinState = !announcement.isPinned;
-    await announcement.update({ isPinned: newPinState });
-
-    await recordAudit({
-      req,
-      action:     newPinState ? 'ANNOUNCEMENT_PINNED' : 'ANNOUNCEMENT_UNPINNED',
-      category:   'system',
-      entityType: 'Announcement',
-      entityId:   announcement.id,
-      metadata:   { title: announcement.title }
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: `Announcement ${newPinState ? 'pinned' : 'unpinned'}.`,
-      data: { isPinned: newPinState }
+      data: { announcement }
     });
   } catch (err) {
     return next(err);
@@ -591,17 +395,118 @@ async function markNotificationRead(req, res, next) {
   }
 }
 
+// ============================================================================
+// UPDATE & DELETE — ANNOUNCEMENTS
+// ============================================================================
+
+async function updateAnnouncement(req, res, next) {
+  try {
+    const announcement = await Announcement.findByPk(Number(req.params.id));
+    if (!announcement) throw new AppError('Announcement not found.', 404);
+
+    // Only the author or an admin can edit
+    if (announcement.authorId !== req.user.id &&
+        !req.user.roles.includes('super_admin') &&
+        !req.user.roles.includes('academic_admin')) {
+      throw new AppError('Forbidden: You can only edit your own announcements.', 403);
+    }
+
+    if (announcement.classId) {
+      await verifyClassAccess(req.user, announcement.classId, { allowAdmin: true, allowInstructor: true });
+    }
+
+    const allowed = ['title', 'content', 'priority', 'isPinned', 'expiresAt', 'scope'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) {
+        updates[key] = key === 'title' || key === 'content'
+          ? sanitizePlainText(req.body[key])
+          : req.body[key];
+      }
+    }
+
+    await announcement.update(updates);
+    return res.status(200).json({ success: true, message: 'Announcement updated.', data: { announcement } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function deleteAnnouncement(req, res, next) {
+  try {
+    const announcement = await Announcement.findByPk(Number(req.params.id));
+    if (!announcement) throw new AppError('Announcement not found.', 404);
+
+    if (announcement.authorId !== req.user.id &&
+        !req.user.roles.includes('super_admin') &&
+        !req.user.roles.includes('academic_admin')) {
+      throw new AppError('Forbidden: You can only delete your own announcements.', 403);
+    }
+
+    await announcement.destroy();
+    return res.status(200).json({ success: true, message: 'Announcement deleted.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// ============================================================================
+// DELETE — DISCUSSION THREADS
+// ============================================================================
+
+async function deleteDiscussionThread(req, res, next) {
+  try {
+    const thread = await DiscussionThread.findByPk(Number(req.params.threadId));
+    if (!thread) throw new AppError('Discussion thread not found.', 404);
+
+    // Only the author, instructor of the class, or admin can delete
+    if (thread.authorId !== req.user.id) {
+      await verifyClassAccess(req.user, thread.classId, { allowAdmin: true, allowInstructor: true });
+    }
+
+    await thread.destroy();
+    return res.status(200).json({ success: true, message: 'Discussion thread deleted.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// ============================================================================
+// ENDORSE A REPLY (mark as official answer)
+// ============================================================================
+async function endorseDiscussionPost(req, res, next) {
+  try {
+    const postId = Number(req.params.postId);
+    const post = await DiscussionPost.findByPk(postId, {
+      include: [{ model: DiscussionThread, as: 'thread' }]
+    });
+    if (!post) throw new AppError('Post not found.', 404);
+
+    await verifyClassAccess(req.user, post.thread.classId, {
+      allowAdmin: true, allowInstructor: true, allowTA: true
+    });
+
+    await post.update({ isInstructorEndorsed: !post.isInstructorEndorsed });
+
+    return res.status(200).json({
+      success: true,
+      message: post.isInstructorEndorsed ? 'Reply endorsed as official answer.' : 'Endorsement removed.',
+      data: { post }
+    });
+  } catch (err) { return next(err); }
+}
+
 module.exports = {
   listAnnouncements,
-  getAnnouncementById,
   createAnnouncement,
   updateAnnouncement,
   deleteAnnouncement,
-  toggleAnnouncementPin,
   listDiscussions,
   createDiscussionThread,
   replyToDiscussionThread,
   escalateOrResolveDiscussion,
+  deleteDiscussionThread,
+  endorseDiscussionPost,
   listConversations,
   startOrSendMessage,
   listNotifications,
