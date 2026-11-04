@@ -129,6 +129,29 @@ async function createLesson(req, res, next) {
       contentHtml: sanitizedHtml
     });
 
+    // If a file was uploaded alongside the lesson, attach it as a LearningResource
+    if (req.file) {
+      const { verifyUploadedFileSafety } = require('../middleware/upload.middleware');
+      const fullPath = path.join(require('../config/env').UPLOAD_DIR, req.file.filename);
+      if (verifyUploadedFileSafety && !verifyUploadedFileSafety(fullPath)) {
+        fs.unlinkSync(fullPath);
+      } else {
+        await LearningResource.create({
+          courseId: lesson.courseId,
+          moduleId: lesson.moduleId,
+          lessonId: lesson.id,
+          title: req.file.originalname,
+          description: 'Attached lesson file',
+          resourceType: 'file',
+          storedFilename: req.file.filename,
+          originalFilename: req.file.originalname,
+          mimeType: req.file.mimetype,
+          fileSizeBytes: req.file.size,
+          uploadedBy: req.user.id
+        });
+      }
+    }
+
     await recordAudit({
       req,
       action: 'LESSON_CREATED',
@@ -138,7 +161,12 @@ async function createLesson(req, res, next) {
       metadata: { courseId: lesson.courseId, moduleId: lesson.moduleId, title: lesson.title }
     });
 
-    return res.status(201).json({ success: true, message: 'Lesson created.', data: { lesson } });
+    // Return lesson with attached resources
+    const fullLesson = await Lesson.findByPk(lesson.id, {
+      include: [{ model: LearningResource, as: 'resources' }]
+    });
+
+    return res.status(201).json({ success: true, message: 'Lesson created.', data: { lesson: fullLesson } });
   } catch (err) {
     return next(err);
   }
@@ -341,8 +369,37 @@ async function getProgressAnalytics(req, res, next) {
 }
 
 // ============================================================================
-// DELETE — MODULES & LESSONS
+// ATTACH FILE TO EXISTING LESSON
 // ============================================================================
+async function attachFileToLesson(req, res, next) {
+  try {
+    const lessonId = Number(req.params.id);
+    const lesson = await Lesson.findByPk(lessonId);
+    if (!lesson) throw new AppError('Lesson not found.', 404);
+
+    if (!req.file) throw new AppError('File is required.', 400);
+
+    const resource = await LearningResource.create({
+      courseId: lesson.courseId,
+      moduleId: lesson.moduleId,
+      lessonId: lesson.id,
+      title: req.body.title || req.file.originalname,
+      description: req.body.description || 'Lesson attachment',
+      resourceType: 'file',
+      storedFilename: req.file.filename,
+      originalFilename: req.file.originalname,
+      mimeType: req.file.mimetype,
+      fileSizeBytes: req.file.size,
+      uploadedBy: req.user.id
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'File attached to lesson.',
+      data: { resource }
+    });
+  } catch (err) { return next(err); }
+}
 
 async function deleteModule(req, res, next) {
   try {
@@ -377,6 +434,7 @@ module.exports = {
   createLesson,
   updateLesson,
   deleteLesson,
+  attachFileToLesson,
   listResources,
   createResource,
   downloadResourceFile,

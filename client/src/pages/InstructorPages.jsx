@@ -204,7 +204,7 @@ export function InstructorCourseStudioPage() {
   const [studioTab, setStudioTab] = useState('content');
   const [modOpen, setModOpen] = useState(false);
   const [lesOpen, setLesOpen] = useState(false);
-  const [resOpen, setResOpen] = useState(false);
+  const [courseOpen, setCourseOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [editMod, setEditMod] = useState(null);
   const [editLes, setEditLes] = useState(null);
@@ -214,7 +214,10 @@ export function InstructorCourseStudioPage() {
   const [expanded, setExpanded] = useState({});
   const [modForm, setModForm] = useState({ title:'', description:'', orderIndex:1, estimatedMinutes:60 });
   const [lesForm, setLesForm] = useState({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'<h2>Objectives</h2>', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' });
-  const [resForm, setResForm] = useState({ title:'', description:'', resourceType:'pdf', externalUrl:'' });
+  const [lesFile, setLesFile] = useState(null);
+  const [courseForm, setCourseForm] = useState({ title:'', code:'', description:'', category:'networking', creditUnits:3, deliveryMode:'Instructor-Led', level:'Intermediate' });
+  const [newCourseResult, setNewCourseResult] = useState(null); // holds { course, joinCode } after creation
+  const [pendingClassId, setPendingClassId] = useState(null);
   const [aiFile, setAiFile] = useState(null);
   const [aiTopic, setAiTopic] = useState('');
   const [aiCount, setAiCount] = useState(10);
@@ -228,6 +231,31 @@ export function InstructorCourseStudioPage() {
   const { data: dData, isLoading } = useQuery({ queryKey:['course',selId], queryFn:()=>lmsApi.getCourseById(selId), enabled:Boolean(selId) });
   const { data: banksData } = useQuery({ queryKey:['question-banks'], queryFn:()=>lmsApi.listQuestionBanks() });
   const refresh = () => queryClient.invalidateQueries({ queryKey:['course',selId] });
+
+  // Pending enrollments for the current class
+  const { data: pendingData, refetch: refetchPending } = useQuery({
+    queryKey: ['pending-enrollments', pendingClassId],
+    queryFn: () => lmsApi.getPendingEnrollments(pendingClassId),
+    enabled: Boolean(pendingClassId)
+  });
+  const pendingEnrollments = pendingData?.data?.pending || [];
+
+  const handleApprove = async (membershipId, studentName) => {
+    try {
+      await lmsApi.approveEnrollment(membershipId);
+      addToast(studentName + ' approved!');
+      refetchPending();
+      queryClient.invalidateQueries({ queryKey: ['course', selId] });
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
+  };
+
+  const handleReject = async (membershipId, studentName) => {
+    try {
+      await lmsApi.rejectEnrollment(membershipId, { reason: 'Enrollment request declined by instructor.' });
+      addToast(studentName + '\'s request rejected.');
+      refetchPending();
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
+  };
 
   const loadJoinCode = async (classId) => {
     if (!classId) return;
@@ -320,10 +348,27 @@ export function InstructorCourseStudioPage() {
     try {
       if (editLes) {
         await lmsApi.updateLesson(editLes.id, lesForm);
+        if (lesFile) {
+          const fd = new FormData();
+          fd.append('file', lesFile);
+          fd.append('title', lesFile.name);
+          await lmsApi.attachFileToLesson(editLes.id, fd);
+          setLesFile(null);
+        }
         addToast('Lesson updated.');
         setEditLes(null);
       } else {
-        await lmsApi.createLesson({ ...lesForm, courseId: Number(selId) });
+        if (lesFile) {
+          const fd = new FormData();
+          Object.entries({ ...lesForm, courseId: String(selId) }).forEach(([k, v]) => {
+            if (v !== null && v !== undefined) fd.append(k, String(v));
+          });
+          fd.append('file', lesFile);
+          await lmsApi.createLesson(fd);
+          setLesFile(null);
+        } else {
+          await lmsApi.createLesson({ ...lesForm, courseId: Number(selId) });
+        }
         addToast('Lesson published.');
         setLesOpen(false);
       }
@@ -331,15 +376,22 @@ export function InstructorCourseStudioPage() {
     } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
 
-  const handleRes = async (e) => {
+  const handleCreateCourse = async (e) => {
     e.preventDefault();
     try {
-      const fd = new FormData();
-      Object.entries({ courseId: String(selId), ...resForm }).forEach(([k, v]) => fd.append(k, v));
-      await lmsApi.createResource(fd);
-      addToast('Resource attached.');
-      setResOpen(false);
-      refresh();
+      // 1. Create the course
+      const courseRes = await lmsApi.createCourse(courseForm);
+      const newCourse = courseRes.data?.course;
+      if (!newCourse) throw new Error('Course creation failed.');
+      addToast('Course created: ' + newCourse.title);
+
+      // 2. If a class section exists for the new course, auto-generate join code
+      // (Class sections are created by Academic Admin — we just show the course was created)
+      // Store result to display to instructor
+      setNewCourseResult({ course: newCourse, joinCode: null });
+      setCourseOpen(false);
+      setCourseForm({ title:'', code:'', description:'', category:'networking', creditUnits:3, deliveryMode:'Instructor-Led', level:'Intermediate' });
+      queryClient.invalidateQueries({ queryKey:['courses'] });
     } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
 
@@ -377,6 +429,10 @@ export function InstructorCourseStudioPage() {
       const cls = course?.offerings?.[0]?.classes?.[0];
       if (cls) { loadJoinCode(cls.id); }
     }
+    if (v === 'pending') {
+      const cls = course?.offerings?.[0]?.classes?.[0];
+      if (cls) { setPendingClassId(cls.id); }
+    }
   };
 
   return (
@@ -395,8 +451,8 @@ export function InstructorCourseStudioPage() {
           <button type="button" onClick={() => { setLesForm({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'<h2>Objectives</h2>', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' }); setLesOpen(true); }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" /> Lesson
           </button>
-          <button type="button" onClick={() => setResOpen(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
-            <Plus className="w-3.5 h-3.5" /> Resource
+          <button type="button" onClick={() => setCourseOpen(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
+            <Plus className="w-3.5 h-3.5" /> Add Course
           </button>
           <button type="button" onClick={() => setAiOpen(true)} className="px-3.5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
             🤖 AI Quiz
@@ -473,8 +529,13 @@ export function InstructorCourseStudioPage() {
           </div>
 
           {/* Tab Switcher */}
-          <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
-            {[['content', '📚 Content'], ['students', '👥 Students'], ['joincode', '🔑 Join Code']].map(([v, l]) => (
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit flex-wrap">
+            {[
+              ['content', '📚 Content'],
+              ['students', '👥 Students'],
+              ['joincode', '🔑 Join Code'],
+              ['pending', '⏳ Pending (' + (pendingEnrollments.length) + ')']
+            ].map(([v, l]) => (
               <button key={v} type="button" onClick={() => switchTab(v)}
                 className={'px-4 py-2 text-xs font-semibold rounded-md transition-colors ' + (studioTab === v ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-800')}>
                 {l}
@@ -652,6 +713,57 @@ export function InstructorCourseStudioPage() {
               )}
             </div>
           )}
+
+          {/* Pending Enrollments Tab */}
+          {studioTab === 'pending' && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="px-5 py-4 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">⏳ Pending Enrollment Requests</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Students who joined via code — approve or reject each request</p>
+                </div>
+                <span className="text-xs font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-lg">
+                  {pendingEnrollments.length} pending
+                </span>
+              </div>
+              {pendingEnrollments.length === 0 ? (
+                <div className="px-5 py-10 text-center">
+                  <p className="text-2xl mb-2">✅</p>
+                  <p className="text-sm font-semibold text-slate-500">No pending requests</p>
+                  <p className="text-xs text-slate-400 mt-1">All enrollment requests have been processed.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {pendingEnrollments.map((m) => (
+                    <div key={m.id} className="px-5 py-4 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center shrink-0 font-bold text-amber-700 text-sm">
+                          {m.student?.firstName?.[0]}{m.student?.lastName?.[0]}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-900">{m.student?.firstName} {m.student?.lastName}</p>
+                          <p className="text-[11px] text-slate-500">{m.student?.email}</p>
+                          <p className="text-[11px] font-mono text-slate-400">{m.student?.studentNumber}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button type="button"
+                          onClick={() => handleApprove(m.id, m.student?.firstName + ' ' + m.student?.lastName)}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1">
+                          ✓ Approve
+                        </button>
+                        <button type="button"
+                          onClick={() => handleReject(m.id, m.student?.firstName + ' ' + m.student?.lastName)}
+                          className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg flex items-center gap-1">
+                          ✕ Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -699,27 +811,121 @@ export function InstructorCourseStudioPage() {
               </select>
             </div>
           </div>
+          {/* File Upload */}
+          <div>
+            <label className="block font-semibold mb-1.5">
+              📎 Attach File (PDF, DOCX, PPTX, ZIP, etc.) — optional
+            </label>
+            <input type="file" accept=".pdf,.docx,.pptx,.ppt,.xlsx,.zip,.txt,.png,.jpg"
+              onChange={e => setLesFile(e.target.files[0])}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs" />
+            {lesFile && (
+              <p className="text-[11px] text-emerald-700 mt-1">
+                📄 {lesFile.name} ({(lesFile.size / 1024).toFixed(1)} KB) — will be attached for download
+              </p>
+            )}
+            {/* Show existing attachments if editing */}
+            {editLes && (editLes.resources || []).length > 0 && (
+              <div className="mt-2 space-y-1">
+                <p className="text-[11px] font-semibold text-slate-600">Existing attachments:</p>
+                {(editLes.resources || []).map(r => (
+                  <a key={r.id} href={'/api/resources/' + r.id + '/download'} target="_blank" rel="noreferrer"
+                    className="flex items-center gap-2 text-[11px] text-blue-600 hover:underline">
+                    ⬇ {r.originalFilename || r.title}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
           <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editLes ? 'Update Lesson' : 'Publish Lesson'}</button>
         </form>
       </ModalDialog>
 
-      {/* Resource Modal */}
-      <ModalDialog isOpen={resOpen} onClose={() => setResOpen(false)} title="Attach Resource">
-        <form onSubmit={handleRes} className="space-y-4 text-xs">
-          <div><label className="block font-semibold mb-1.5">Title</label><input required value={resForm.title} onChange={e => setResForm({ ...resForm, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
-          <div><label className="block font-semibold mb-1.5">Type</label>
-            <select value={resForm.resourceType} onChange={e => setResForm({ ...resForm, resourceType: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
-              <option value="pdf">PDF</option>
-              <option value="packet_tracer">Packet Tracer</option>
-              <option value="worksheet">Worksheet</option>
-              <option value="code">Starter Code</option>
-              <option value="video">Video Link</option>
-            </select>
+      {/* Add Course Modal */}
+      <ModalDialog isOpen={courseOpen} onClose={() => { setCourseOpen(false); setNewCourseResult(null); }} title="➕ Add New Course" maxWidth="max-w-xl">
+        {newCourseResult ? (
+          <div className="space-y-4 text-xs">
+            <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-center">
+              <p className="text-lg font-bold text-emerald-900 mb-1">✅ Course Created!</p>
+              <p className="text-sm font-semibold text-slate-800">{newCourseResult.course.title}</p>
+              <p className="font-mono text-slate-500 mt-0.5">{newCourseResult.course.code}</p>
+            </div>
+            <div className="p-4 rounded-xl bg-blue-50 border-2 border-blue-200 text-center">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-1">Next Step</p>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Go to the <strong>🔑 Join Code</strong> tab after a class section is assigned to this course to generate a join code for students.
+              </p>
+            </div>
+            <button type="button" onClick={() => { setCourseOpen(false); setNewCourseResult(null); }}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">
+              Done
+            </button>
           </div>
-          <div><label className="block font-semibold mb-1.5">URL</label><input value={resForm.externalUrl} onChange={e => setResForm({ ...resForm, externalUrl: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
-          <div><label className="block font-semibold mb-1.5">Description</label><textarea rows={2} value={resForm.description} onChange={e => setResForm({ ...resForm, description: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
-          <button type="submit" className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg">Attach Resource</button>
-        </form>
+        ) : (
+          <form onSubmit={handleCreateCourse} className="space-y-4 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold mb-1.5">Course Title</label>
+                <input required value={courseForm.title} onChange={e => setCourseForm({ ...courseForm, title: e.target.value })}
+                  placeholder="e.g., Introduction to Networks" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1.5">Course Code</label>
+                <input required value={courseForm.code} onChange={e => setCourseForm({ ...courseForm, code: e.target.value })}
+                  placeholder="e.g., ITN-101" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono" />
+              </div>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1.5">Description</label>
+              <textarea rows={3} value={courseForm.description} onChange={e => setCourseForm({ ...courseForm, description: e.target.value })}
+                placeholder="Brief description of the course…" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block font-semibold mb-1.5">Category</label>
+                <select value={courseForm.category} onChange={e => setCourseForm({ ...courseForm, category: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                  <option value="networking">Networking</option>
+                  <option value="programming">Programming</option>
+                  <option value="cybersecurity">Cybersecurity</option>
+                  <option value="database">Database</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1.5">Level</label>
+                <select value={courseForm.level} onChange={e => setCourseForm({ ...courseForm, level: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                  <option value="Introductory">Introductory</option>
+                  <option value="Intermediate">Intermediate</option>
+                  <option value="Advanced">Advanced</option>
+                  <option value="Professional">Professional</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1.5">Credit Units</label>
+                <input type="number" min="1" max="6" value={courseForm.creditUnits}
+                  onChange={e => setCourseForm({ ...courseForm, creditUnits: Number(e.target.value) })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+              </div>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1.5">Delivery Mode</label>
+              <select value={courseForm.deliveryMode} onChange={e => setCourseForm({ ...courseForm, deliveryMode: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                <option value="Instructor-Led">Instructor-Led</option>
+                <option value="Self-Paced">Self-Paced</option>
+                <option value="Hybrid">Hybrid</option>
+              </select>
+            </div>
+            <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-[11px]">
+              ℹ️ After creating the course, a class section will need to be assigned by Academic Admin. Then you can generate a <strong>Join Code</strong> from the 🔑 tab for students to enroll.
+            </div>
+            <button type="submit" className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg">
+              Create Course
+            </button>
+          </form>
+        )}
       </ModalDialog>
 
       {/* AI Quiz Modal */}

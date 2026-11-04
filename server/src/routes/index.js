@@ -125,9 +125,10 @@ router.put('/modules/:id', requireAuth, requirePermission('content:manage'), con
 router.delete('/modules/:id', requireAuth, requirePermission('content:manage'), contentCtrl.deleteModule);
 
 router.get('/lessons/:id', requireAuth, contentCtrl.getLessonById);
-router.post('/lessons', requireAuth, requirePermission('content:manage'), contentCtrl.createLesson);
+router.post('/lessons', requireAuth, requirePermission('content:manage'), uploadMiddleware.single('file'), contentCtrl.createLesson);
 router.put('/lessons/:id', requireAuth, requirePermission('content:manage'), contentCtrl.updateLesson);
 router.delete('/lessons/:id', requireAuth, requirePermission('content:manage'), contentCtrl.deleteLesson);
+router.post('/lessons/:id/attach-file', requireAuth, requirePermission('content:manage'), uploadMiddleware.single('file'), contentCtrl.attachFileToLesson);
 
 router.get('/resources', requireAuth, contentCtrl.listResources);
 router.post('/resources', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), uploadMiddleware.single('file'), contentCtrl.createResource);
@@ -213,9 +214,12 @@ router.post('/assignments/:id/extend', requireAuth, requirePermission('assignmen
 // 13. AI Quiz Generation from file upload
 router.post('/ai/generate-questions', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor'), uploadMiddleware.single('file'), aiQuizCtrl.generateQuestionsFromFile);
 
-// 14. Join Code — instructor manages, student joins
+// 14. Join Code — instructor manages, student joins, enrollment approval
 router.get('/classes/:classId/join-code', requireAuth, joinCodeCtrl.getJoinCodeInfo);
 router.post('/classes/:classId/join-code', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor'), joinCodeCtrl.generateJoinCode);
+router.get('/classes/:classId/pending-enrollments', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor'), joinCodeCtrl.getPendingEnrollments);
+router.post('/enrollments/:membershipId/approve', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor'), joinCodeCtrl.approveEnrollment);
+router.post('/enrollments/:membershipId/reject', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor'), joinCodeCtrl.rejectEnrollment);
 router.post('/join-class', requireAuth, requireRole('student'), joinCodeCtrl.joinClassByCode);
 
 module.exports = router;
