@@ -12,6 +12,8 @@ const assessCtrl = require('../controllers/assessment.controller');
 const gradingCtrl = require('../controllers/grading.controller');
 const commCtrl = require('../controllers/communication.controller');
 const attendCtrl = require('../controllers/attendance.controller');
+const aiQuizCtrl = require('../controllers/aiquiz.controller');
+const joinCodeCtrl = require('../controllers/joincode.controller');
 
 const router = express.Router();
 
@@ -207,6 +209,14 @@ router.post('/grades/class/:classId/import-csv', requireAuth, requirePermission(
 
 // 12. Assignment extension (per-student due-date override)
 router.post('/assignments/:id/extend', requireAuth, requirePermission('assignments:manage'), assessCtrl.extendAssignmentForStudent);
+
+// 13. AI Quiz Generation from file upload
+router.post('/ai/generate-questions', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor'), uploadMiddleware.single('file'), aiQuizCtrl.generateQuestionsFromFile);
+
+// 14. Join Code — instructor manages, student joins
+router.get('/classes/:classId/join-code', requireAuth, joinCodeCtrl.getJoinCodeInfo);
+router.post('/classes/:classId/join-code', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor'), joinCodeCtrl.generateJoinCode);
+router.post('/join-class', requireAuth, requireRole('student'), joinCodeCtrl.joinClassByCode);
 
 module.exports = router;
 
