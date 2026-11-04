@@ -147,7 +147,9 @@ module.exports = (sequelize) => {
     finalGradesSubmittedAt: { type: DataTypes.DATE, allowNull: true, field: 'final_grades_submitted_at' },
     finalGradesApprovedBy: { type: DataTypes.INTEGER, allowNull: true, field: 'final_grades_approved_by' },
     finalGradesApprovedAt: { type: DataTypes.DATE, allowNull: true, field: 'final_grades_approved_at' },
-    status: { type: DataTypes.ENUM('active', 'closed', 'archived'), defaultValue: 'active' }
+    status: { type: DataTypes.ENUM('active', 'closed', 'archived'), defaultValue: 'active' },
+    joinCode: { type: DataTypes.STRING(12), allowNull: true, unique: true, field: 'join_code' },
+    joinCodeEnabled: { type: DataTypes.BOOLEAN, defaultValue: false, field: 'join_code_enabled' }
   }, {
     tableName: 'classes',
     indexes: [

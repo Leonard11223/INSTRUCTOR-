@@ -189,7 +189,14 @@ export const lmsApi = {
   extendAssignment: (assignmentId, data) =>
     apiClient.post(`/assignments/${assignmentId}/extend`, data).then((r) => r.data),
 
-  // ── Messages & Notifications ──────────────────────────────────────────────
+  // ── AI Quiz Generation ────────────────────────────────────────────────────
+  generateQuestionsFromFile: (formData) =>
+    apiClient.post('/ai/generate-questions', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data),
+
+  // ── Join Code ─────────────────────────────────────────────────────────────
+  getJoinCodeInfo: (classId) => apiClient.get(`/classes/${classId}/join-code`).then((r) => r.data),
+  generateJoinCode: (classId, data) => apiClient.post(`/classes/${classId}/join-code`, data).then((r) => r.data),
+  joinClassByCode: (data) => apiClient.post('/join-class', data).then((r) => r.data),
   listMessages: () => apiClient.get('/messages').then((r) => r.data),
   sendMessage: (data) => apiClient.post('/messages', data).then((r) => r.data),
   listNotifications: () => apiClient.get('/notifications').then((r) => r.data),

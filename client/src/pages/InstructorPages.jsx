@@ -196,13 +196,16 @@ export function InstructorDashboardPage() {
 /* ══════════════════════════════════════════════════════════════
    2. COURSE STUDIO — with edit/delete module & lesson
 ══════════════════════════════════════════════════════════════ */
+
 export function InstructorCourseStudioPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
   const [selId, setSelId] = useState(null);
+  const [studioTab, setStudioTab] = useState('content');
   const [modOpen, setModOpen] = useState(false);
   const [lesOpen, setLesOpen] = useState(false);
   const [resOpen, setResOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [editMod, setEditMod] = useState(null);
   const [editLes, setEditLes] = useState(null);
   const [previewLes, setPreviewLes] = useState(null);
@@ -212,218 +215,626 @@ export function InstructorCourseStudioPage() {
   const [modForm, setModForm] = useState({ title:'', description:'', orderIndex:1, estimatedMinutes:60 });
   const [lesForm, setLesForm] = useState({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'<h2>Objectives</h2>', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' });
   const [resForm, setResForm] = useState({ title:'', description:'', resourceType:'pdf', externalUrl:'' });
+  const [aiFile, setAiFile] = useState(null);
+  const [aiTopic, setAiTopic] = useState('');
+  const [aiCount, setAiCount] = useState(10);
+  const [aiResults, setAiResults] = useState([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [joinCodeData, setJoinCodeData] = useState(null);
+  const [joinCodeLoading, setJoinCodeLoading] = useState(false);
 
   const { data: cData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
   const { data: dData, isLoading } = useQuery({ queryKey:['course',selId], queryFn:()=>lmsApi.getCourseById(selId), enabled:Boolean(selId) });
-
   const refresh = () => queryClient.invalidateQueries({ queryKey:['course',selId] });
+
+  const loadJoinCode = async (classId) => {
+    if (!classId) return;
+    setJoinCodeLoading(true);
+    try {
+      const res = await lmsApi.getJoinCodeInfo(classId);
+      setJoinCodeData(res.data);
+    } catch (_) {
+      // ignore
+    }
+    setJoinCodeLoading(false);
+  };
+
+  const handleGenerateJoinCode = async (classId, regenerate) => {
+    try {
+      const res = await lmsApi.generateJoinCode(classId, { enable: true, regenerate: !!regenerate });
+      setJoinCodeData(res.data);
+      addToast('Join code generated!');
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleDisableJoinCode = async (classId) => {
+    try {
+      const res = await lmsApi.generateJoinCode(classId, { enable: false });
+      setJoinCodeData(res.data);
+      addToast('Join code disabled.');
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleAiGenerate = async (e) => {
+    e.preventDefault();
+    if (!aiFile) { addToast('Please select a file.', 'error'); return; }
+    setAiLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', aiFile);
+      fd.append('count', String(aiCount));
+      fd.append('topic', aiTopic);
+      const res = await lmsApi.generateQuestionsFromFile(fd);
+      setAiResults(res.data.questions);
+      addToast(res.data.questions.length + ' questions generated (' + res.data.method + ').');
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+    setAiLoading(false);
+  };
+
+  const handleSaveAiQuestions = async (bankId, courseId) => {
+    if (!bankId || !courseId) { addToast('Select a question bank and course first.', 'error'); return; }
+    setAiSaving(true);
+    let saved = 0;
+    for (const q of aiResults) {
+      try {
+        await lmsApi.createQuestion({ ...q, questionBankId: Number(bankId), courseId: Number(courseId) });
+        saved++;
+      } catch (_) {
+        // skip
+      }
+    }
+    addToast(saved + ' questions saved to question bank.');
+    setAiSaving(false);
+    setAiOpen(false);
+    setAiResults([]);
+    setAiFile(null);
+    queryClient.invalidateQueries({ queryKey: ['question-banks'] });
+  };
 
   const handleSaveMod = async (e) => {
     e.preventDefault();
     try {
-      if (editMod) { await lmsApi.updateModule(editMod.id, modForm); addToast('Module updated.'); setEditMod(null); }
-      else { await lmsApi.createModule({ ...modForm, courseId:Number(selId) }); addToast('Module added.'); setModOpen(false); }
+      if (editMod) {
+        await lmsApi.updateModule(editMod.id, modForm);
+        addToast('Module updated.');
+        setEditMod(null);
+      } else {
+        await lmsApi.createModule({ ...modForm, courseId: Number(selId) });
+        addToast('Module added.');
+        setModOpen(false);
+      }
       refresh();
-    } catch (err) { addToast(extractErrorMessage(err),'error'); }
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
+
   const handleSaveLes = async (e) => {
     e.preventDefault();
     try {
-      if (editLes) { await lmsApi.updateLesson(editLes.id, lesForm); addToast('Lesson updated.'); setEditLes(null); }
-      else { await lmsApi.createLesson({ ...lesForm, courseId:Number(selId) }); addToast('Lesson published.'); setLesOpen(false); }
+      if (editLes) {
+        await lmsApi.updateLesson(editLes.id, lesForm);
+        addToast('Lesson updated.');
+        setEditLes(null);
+      } else {
+        await lmsApi.createLesson({ ...lesForm, courseId: Number(selId) });
+        addToast('Lesson published.');
+        setLesOpen(false);
+      }
       refresh();
-    } catch (err) { addToast(extractErrorMessage(err),'error'); }
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
+
   const handleRes = async (e) => {
     e.preventDefault();
     try {
       const fd = new FormData();
-      Object.entries({ courseId:String(selId), ...resForm }).forEach(([k,v])=>fd.append(k,v));
-      await lmsApi.createResource(fd); addToast('Resource attached.'); setResOpen(false); refresh();
-    } catch (err) { addToast(extractErrorMessage(err),'error'); }
+      Object.entries({ courseId: String(selId), ...resForm }).forEach(([k, v]) => fd.append(k, v));
+      await lmsApi.createResource(fd);
+      addToast('Resource attached.');
+      setResOpen(false);
+      refresh();
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
+
   const handleDelMod = async () => {
     try { await lmsApi.deleteModule(delMod.id); addToast('Module archived.'); setDelMod(null); refresh(); }
-    catch (err) { addToast(extractErrorMessage(err),'error'); }
+    catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
+
   const handleDelLes = async () => {
     try { await lmsApi.deleteLesson(delLes.id); addToast('Lesson archived.'); setDelLes(null); refresh(); }
-    catch (err) { addToast(extractErrorMessage(err),'error'); }
+    catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
 
-  const courses = cData?.data?.courses||[];
-  const course = dData?.data?.course;
-  const toggle = (id) => setExpanded(p=>({...p,[id]:p[id]===false}));
-  const emoji = { laboratory:'🔬', video:'🎬', coding_exercise:'💻', reading:'📖' };
+  const moveModule = async (modules, fromIdx, toIdx) => {
+    const mods = [...modules];
+    const tmp = mods[fromIdx];
+    mods[fromIdx] = mods[toIdx];
+    mods[toIdx] = tmp;
+    try {
+      await apiClient.put('/modules/reorder', { modules: mods.map((m, i) => ({ id: m.id, orderIndex: i + 1 })) });
+      queryClient.invalidateQueries({ queryKey: ['course', selId] });
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
+  };
 
-  const openEditMod = (mod) => { setModForm({ title:mod.title, description:mod.description||'', orderIndex:mod.orderIndex||1, estimatedMinutes:mod.estimatedMinutes||60 }); setEditMod(mod); };
-  const openEditLes = (les) => { setLesForm({ moduleId:les.moduleId, title:les.title, lessonType:les.lessonType, contentHtml:les.contentHtml||'', codeSnippet:les.codeSnippet||'', estimatedMinutes:les.estimatedMinutes||45, publicationStatus:les.publicationStatus||'published' }); setEditLes(les); };
+  const courses = cData?.data?.courses || [];
+  const course = dData?.data?.course;
+  const toggle = (id) => setExpanded(p => ({ ...p, [id]: p[id] === false }));
+  const emoji = { laboratory: '🔬', video: '🎬', coding_exercise: '💻', reading: '📖' };
+  const openEditMod = (mod) => { setModForm({ title: mod.title, description: mod.description || '', orderIndex: mod.orderIndex || 1, estimatedMinutes: mod.estimatedMinutes || 60 }); setEditMod(mod); };
+  const openEditLes = (les) => { setLesForm({ moduleId: les.moduleId, title: les.title, lessonType: les.lessonType, contentHtml: les.contentHtml || '', codeSnippet: les.codeSnippet || '', estimatedMinutes: les.estimatedMinutes || 45, publicationStatus: les.publicationStatus || 'published' }); setEditLes(les); };
+
+  const switchTab = (v) => {
+    setStudioTab(v);
+    if (v === 'joincode') {
+      const cls = course?.offerings?.[0]?.classes?.[0];
+      if (cls) { loadJoinCode(cls.id); }
+    }
+  };
 
   return (
     <div className="space-y-6 pb-8">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200">
-        <div><Badge label="Course & Curriculum Studio" color="emerald" icon={BookOpen}/><h1 className="text-2xl font-bold text-slate-900 tracking-tight">My Courses & Content</h1><p className="text-sm text-slate-500 mt-1">Author modules, lessons, and attach learning resources.</p></div>
+        <div>
+          <Badge label="Course & Curriculum Studio" color="emerald" icon={BookOpen} />
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">My Courses & Content</h1>
+          <p className="text-sm text-slate-500 mt-1">Author modules, lessons, and attach learning resources.</p>
+        </div>
         <div className="flex gap-2 flex-wrap">
-          <button type="button" onClick={()=>{setModForm({title:'',description:'',orderIndex:1,estimatedMinutes:60});setModOpen(true);}} className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> Module</button>
-          <button type="button" onClick={()=>{setLesForm({moduleId:'',title:'',lessonType:'laboratory',contentHtml:'<h2>Objectives</h2>',codeSnippet:'',estimatedMinutes:45,publicationStatus:'published'});setLesOpen(true);}} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> Lesson</button>
-          <button type="button" onClick={()=>setResOpen(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5"><Plus className="w-3.5 h-3.5"/> Resource</button>
-          <button type="button" disabled={!selId||(course?.modules||[]).length<2} onClick={async()=>{
-            const mods=[...(course?.modules||[])].sort((a,b)=>a.orderIndex-b.orderIndex);
-            const payload=mods.map((m,i)=>({id:m.id,orderIndex:i+1}));
-            try{await apiClient.put('/modules/reorder',{modules:payload});addToast('Module order saved.');queryClient.invalidateQueries({queryKey:['course',selId]});}
-            catch(err){addToast(extractErrorMessage(err),'error');}
-          }} className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg flex items-center gap-1.5 disabled:opacity-40">↕ Save Order</button>
+          <button type="button" onClick={() => { setModForm({ title:'', description:'', orderIndex:1, estimatedMinutes:60 }); setModOpen(true); }} className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg flex items-center gap-1.5">
+            <Plus className="w-3.5 h-3.5" /> Module
+          </button>
+          <button type="button" onClick={() => { setLesForm({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'<h2>Objectives</h2>', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' }); setLesOpen(true); }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
+            <Plus className="w-3.5 h-3.5" /> Lesson
+          </button>
+          <button type="button" onClick={() => setResOpen(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
+            <Plus className="w-3.5 h-3.5" /> Resource
+          </button>
+          <button type="button" onClick={() => setAiOpen(true)} className="px-3.5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
+            🤖 AI Quiz
+          </button>
         </div>
       </div>
 
-      {courses.length>0&&<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{courses.map(c=>(
-        <button key={c.id} type="button" onClick={()=>setSelId(c.id)} className={`text-left p-4 rounded-xl border-2 transition-all ${selId===c.id?'border-blue-500 bg-blue-50 shadow-sm':'border-slate-200 bg-white hover:border-slate-300'}`}>
-          <div className="flex items-start justify-between gap-2"><div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><BookOpen className="w-4 h-4 text-blue-600"/></div>{selId===c.id&&<CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0"/>}</div>
-          <p className="text-xs font-bold text-slate-900 mt-2 truncate">{c.title}</p><p className="text-[11px] font-mono text-slate-500 mt-0.5">{c.code}</p>
-          <div className="flex items-center gap-2 mt-2"><StatusBadge status={c.publicationStatus||'draft'}/><span className="text-[11px] text-slate-400">{c.modules?.length??0} modules</span></div>
-        </button>
-      ))}</div>}
-
-      {!selId?(<div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center"><BookOpen className="w-10 h-10 text-slate-300 mx-auto mb-3"/><p className="text-sm font-semibold text-slate-500">Select a course to view its content.</p></div>
-      ):isLoading||!course?<LoadingState/>:(
-        <div className="space-y-3">
-          <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div><h2 className="text-base font-bold text-slate-900">{course.title}</h2>{course.description&&<p className="text-xs text-slate-500 mt-0.5">{course.description}</p>}</div>
-            <div className="flex items-center gap-3 shrink-0">
-              <div className="text-center"><p className="text-lg font-bold text-blue-600">{course.modules?.length??0}</p><p className="text-[11px] text-slate-500">Modules</p></div>
-              <div className="w-px h-8 bg-slate-200"/>
-              <div className="text-center"><p className="text-lg font-bold text-emerald-600">{(course.modules||[]).reduce((s,m)=>s+(m.lessons?.length||0),0)}</p><p className="text-[11px] text-slate-500">Lessons</p></div>
-              <div className="w-px h-8 bg-slate-200"/><StatusBadge status={course.publicationStatus||'draft'}/>
-            </div>
-          </div>
-          {(course.modules||[]).length===0?(<div className="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center"><p className="text-xs text-slate-400">No modules yet.</p></div>
-          ):(course.modules||[]).map((mod,mi)=>{
-            const open=expanded[mod.id]!==false;
-            return (
-              <div key={mod.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-                <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                  <button type="button" onClick={()=>toggle(mod.id)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
-                    <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">{mi+1}</span>
-                    <div className="min-w-0"><h3 className="text-sm font-bold text-slate-900 truncate">{mod.title}</h3>{mod.description&&<p className="text-[11px] text-slate-500 truncate">{mod.description}</p>}</div>
-                  </button>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[11px] text-slate-500 hidden sm:block">{mod.lessons?.length||0} lessons</span>
-                    <StatusBadge status={mod.publicationStatus||'draft'}/>
-                    <div className="flex flex-col">
-                      <button type="button" disabled={mi===0} onClick={async()=>{const mods=[...(course?.modules||[])];[mods[mi-1],mods[mi]]=[mods[mi],mods[mi-1]];try{await apiClient.put('/modules/reorder',{modules:mods.map((m,i)=>({id:m.id,orderIndex:i+1}))});queryClient.invalidateQueries({queryKey:['course',selId]});}catch(e){addToast(extractErrorMessage(e),'error');}}} className="text-[10px] text-slate-400 hover:text-blue-600 disabled:opacity-30 leading-none">▲</button>
-                      <button type="button" disabled={mi===(course?.modules||[]).length-1} onClick={async()=>{const mods=[...(course?.modules||[])];[mods[mi],mods[mi+1]]=[mods[mi+1],mods[mi]];try{await apiClient.put('/modules/reorder',{modules:mods.map((m,i)=>({id:m.id,orderIndex:i+1}))});queryClient.invalidateQueries({queryKey:['course',selId]});}catch(e){addToast(extractErrorMessage(e),'error');}}} className="text-[10px] text-slate-400 hover:text-blue-600 disabled:opacity-30 leading-none">▼</button>
-                    </div>
-                    <button type="button" onClick={()=>openEditMod(mod)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5"/></button>
-                    <button type="button" onClick={()=>setDelMod(mod)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
-                  </div>
+      {/* Course Picker */}
+      {courses.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {courses.map((c) => (
+            <button key={c.id} type="button" onClick={() => setSelId(c.id)}
+              className={'text-left p-4 rounded-xl border-2 transition-all ' + (selId === c.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300')}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                  <BookOpen className="w-4 h-4 text-blue-600" />
                 </div>
-                {open&&<div className="divide-y divide-slate-100">
-                  {(mod.lessons||[]).length===0?(<p className="px-5 py-3 text-xs text-slate-400 italic">No lessons yet.</p>
-                  ):(mod.lessons||[]).map((les,li)=>(
-                    <div key={les.id} className="px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-slate-50">
-                      <div className="flex items-center gap-3 min-w-0"><span className="text-base shrink-0">{emoji[les.lessonType]||'📄'}</span><div className="min-w-0"><p className="text-xs font-semibold text-slate-900 truncate">{mi+1}.{li+1} {les.title}</p><p className="text-[11px] text-slate-500 capitalize mt-0.5">{les.lessonType?.replace(/_/g,' ')} · {les.estimatedMinutes} min</p></div></div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <StatusBadge status={les.publicationStatus||'draft'}/>
-                        <button type="button" onClick={()=>setPreviewLes(les)} className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors" title="Preview"><Eye className="w-3.5 h-3.5"/></button>
-                        <button type="button" onClick={()=>openEditLes(les)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5"/></button>
-                        <button type="button" onClick={()=>setDelLes(les)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
-                      </div>
-                    </div>
-                  ))}
-                </div>}
+                {selId === c.id && <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />}
               </div>
-            );
-          })}
+              <p className="text-xs font-bold text-slate-900 mt-2 truncate">{c.title}</p>
+              <p className="text-[11px] font-mono text-slate-500 mt-0.5">{c.code}</p>
+              <div className="flex items-center gap-2 mt-2">
+                <StatusBadge status={c.publicationStatus || 'draft'} />
+                <span className="text-[11px] text-slate-400">{c.modules?.length ?? 0} modules</span>
+              </div>
+            </button>
+          ))}
         </div>
       )}
 
-      {/* Module Modal (create + edit) */}
-      <ModalDialog isOpen={modOpen||Boolean(editMod)} onClose={()=>{setModOpen(false);setEditMod(null);}} title={editMod?'Edit Module':'Create Module'}>
-        <form onSubmit={handleSaveMod} className="space-y-4 text-xs">
-          <div><label className="block font-semibold mb-1.5">Title</label><input required value={modForm.title} onChange={e=>setModForm({...modForm,title:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-          <div><label className="block font-semibold mb-1.5">Description</label><textarea rows={3} value={modForm.description} onChange={e=>setModForm({...modForm,description:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="block font-semibold mb-1.5">Order</label><input type="number" value={modForm.orderIndex} onChange={e=>setModForm({...modForm,orderIndex:Number(e.target.value)})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-            <div><label className="block font-semibold mb-1.5">Est. Minutes</label><input type="number" value={modForm.estimatedMinutes} onChange={e=>setModForm({...modForm,estimatedMinutes:Number(e.target.value)})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+      {/* No course selected */}
+      {!selId && (
+        <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
+          <BookOpen className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <p className="text-sm font-semibold text-slate-500">Select a course to view its content.</p>
+        </div>
+      )}
+
+      {/* Course selected — loading */}
+      {selId && (isLoading || !course) && <LoadingState />}
+
+      {/* Course selected — loaded */}
+      {selId && !isLoading && course && (
+        <div className="space-y-3">
+          {/* Meta Banner */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-0.5">{course.code}</p>
+              <h2 className="text-base font-bold text-slate-900">{course.title}</h2>
+              {course.description && <p className="text-xs text-slate-500 mt-0.5">{course.description}</p>}
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="text-center">
+                <p className="text-lg font-bold text-blue-600">{course.modules?.length ?? 0}</p>
+                <p className="text-[11px] text-slate-500">Modules</p>
+              </div>
+              <div className="w-px h-8 bg-slate-200" />
+              <div className="text-center">
+                <p className="text-lg font-bold text-emerald-600">
+                  {(course.modules || []).reduce((s, m) => s + (m.lessons?.length || 0), 0)}
+                </p>
+                <p className="text-[11px] text-slate-500">Lessons</p>
+              </div>
+              <div className="w-px h-8 bg-slate-200" />
+              <div className="text-center">
+                <p className="text-lg font-bold text-violet-600">
+                  {(course.offerings || []).reduce((s, o) => s + (o.classes || []).reduce((a, c) => a + (c.memberships?.length || 0), 0), 0)}
+                </p>
+                <p className="text-[11px] text-slate-500">Students</p>
+              </div>
+              <div className="w-px h-8 bg-slate-200" />
+              <StatusBadge status={course.publicationStatus || 'draft'} />
+            </div>
           </div>
-          <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editMod?'Update Module':'Save Module'}</button>
+
+          {/* Tab Switcher */}
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+            {[['content', '📚 Content'], ['students', '👥 Students'], ['joincode', '🔑 Join Code']].map(([v, l]) => (
+              <button key={v} type="button" onClick={() => switchTab(v)}
+                className={'px-4 py-2 text-xs font-semibold rounded-md transition-colors ' + (studioTab === v ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-800')}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* Content Tab */}
+          {studioTab === 'content' && (
+            <div className="space-y-3">
+              {(course.modules || []).length === 0 ? (
+                <div className="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center">
+                  <p className="text-xs text-slate-400">No modules yet — click Module to get started.</p>
+                </div>
+              ) : (
+                (course.modules || []).map((mod, mi) => {
+                  const open = expanded[mod.id] !== false;
+                  return (
+                    <div key={mod.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                      <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                        <button type="button" onClick={() => toggle(mod.id)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
+                          <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">{mi + 1}</span>
+                          <div className="min-w-0">
+                            <h3 className="text-sm font-bold text-slate-900 truncate">{mod.title}</h3>
+                            {mod.description && <p className="text-[11px] text-slate-500 truncate">{mod.description}</p>}
+                          </div>
+                        </button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[11px] text-slate-500 hidden sm:block">{mod.lessons?.length || 0} lessons</span>
+                          <StatusBadge status={mod.publicationStatus || 'draft'} />
+                          <div className="flex flex-col">
+                            <button type="button" disabled={mi === 0}
+                              onClick={() => moveModule(course.modules, mi, mi - 1)}
+                              className="text-[10px] text-slate-400 hover:text-blue-600 disabled:opacity-30 leading-none">▲</button>
+                            <button type="button" disabled={mi === (course.modules || []).length - 1}
+                              onClick={() => moveModule(course.modules, mi, mi + 1)}
+                              className="text-[10px] text-slate-400 hover:text-blue-600 disabled:opacity-30 leading-none">▼</button>
+                          </div>
+                          <button type="button" onClick={() => openEditMod(mod)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={() => setDelMod(mod)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </div>
+                      {open && (
+                        <div className="divide-y divide-slate-100">
+                          {(mod.lessons || []).length === 0 ? (
+                            <p className="px-5 py-3 text-xs text-slate-400 italic">No lessons yet.</p>
+                          ) : (
+                            (mod.lessons || []).map((les, li) => (
+                              <div key={les.id} className="px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-slate-50">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <span className="text-base shrink-0">{emoji[les.lessonType] || '📄'}</span>
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-slate-900 truncate">{mi + 1}.{li + 1} {les.title}</p>
+                                    <p className="text-[11px] text-slate-500 capitalize mt-0.5">{les.lessonType?.replace(/_/g, ' ')} · {les.estimatedMinutes} min</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <StatusBadge status={les.publicationStatus || 'draft'} />
+                                  <button type="button" onClick={() => setPreviewLes(les)} className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors" title="Preview"><Eye className="w-3.5 h-3.5" /></button>
+                                  <button type="button" onClick={() => openEditLes(les)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                                  <button type="button" onClick={() => setDelLes(les)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* Students Tab */}
+          {studioTab === 'students' && (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="px-5 py-4 bg-slate-50 border-b border-slate-200">
+                <h2 className="text-sm font-bold text-slate-900">Enrolled Students — {course.title}</h2>
+                <p className="text-xs text-slate-500 mt-0.5">All students enrolled in sections of this course</p>
+              </div>
+              {(course.offerings || []).length === 0 ? (
+                <p className="px-5 py-8 text-xs text-slate-400 text-center">No class sections found for this course.</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {(course.offerings || []).map((offering) => (
+                    (offering.classes || []).map((cls) => (
+                      <div key={cls.id} className="p-5">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <p className="text-xs font-bold text-slate-900">{cls.sectionCode}</p>
+                            <p className="text-[11px] text-slate-500">{offering.semester?.name} · {cls.schedule || 'No schedule'} · {cls.room || 'No room'}</p>
+                          </div>
+                          <span className="text-xs font-bold text-blue-700">{cls.memberships?.length || 0} / {cls.capacity} students</span>
+                        </div>
+                        {(cls.memberships || []).length === 0 ? (
+                          <p className="text-xs text-slate-400 italic">No students enrolled yet.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                            {(cls.memberships || []).map((m) => (
+                              <div key={m.id} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs">
+                                <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center shrink-0 font-bold text-blue-700 text-[11px]">
+                                  {m.student?.firstName?.[0]}{m.student?.lastName?.[0]}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-semibold text-slate-900 truncate">{m.student?.firstName} {m.student?.lastName}</p>
+                                  <p className="text-slate-400 font-mono truncate">{m.student?.studentNumber}</p>
+                                </div>
+                                <StatusBadge status={m.status} />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Join Code Tab */}
+          {studioTab === 'joincode' && (
+            <div className="space-y-4">
+              {(course.offerings || []).length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-8">No class sections found.</p>
+              ) : (
+                (course.offerings || []).map((offering) => (
+                  (offering.classes || []).map((cls) => (
+                    <div key={cls.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <p className="text-xs font-bold text-slate-900">{cls.sectionCode} — {course.title}</p>
+                          <p className="text-[11px] text-slate-500">{offering.semester?.name}</p>
+                        </div>
+                        <StatusBadge status={joinCodeData?.joinCodeEnabled ? 'active' : 'draft'} />
+                      </div>
+                      {joinCodeLoading ? <LoadingState /> : (
+                        <div className="space-y-4">
+                          {joinCodeData?.joinCode && joinCodeData?.joinCodeEnabled ? (
+                            <div className="p-4 rounded-xl bg-blue-50 border-2 border-blue-200 text-center">
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-1">Class Join Code</p>
+                              <p className="text-4xl font-black text-blue-800 tracking-[0.3em] font-mono">{joinCodeData.joinCode}</p>
+                              <p className="text-xs text-blue-600 mt-2">{joinCodeData.enrolledCount || 0} / {joinCodeData.capacity} students enrolled</p>
+                              <p className="text-[11px] text-slate-500 mt-1">Share this code with your students. They enter it in the Student Dashboard to join.</p>
+                            </div>
+                          ) : (
+                            <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center">
+                              <p className="text-xs text-slate-500">No join code active for this section.</p>
+                            </div>
+                          )}
+                          <div className="flex gap-2 flex-wrap">
+                            <button type="button" onClick={() => handleGenerateJoinCode(cls.id, false)}
+                              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">
+                              {joinCodeData?.joinCode ? 'Enable Code' : 'Generate Code'}
+                            </button>
+                            {joinCodeData?.joinCode && (
+                              <button type="button" onClick={() => handleGenerateJoinCode(cls.id, true)}
+                                className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg">
+                                🔄 New Code
+                              </button>
+                            )}
+                            {joinCodeData?.joinCodeEnabled && (
+                              <button type="button" onClick={() => handleDisableJoinCode(cls.id)}
+                                className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg">
+                                Disable
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Module Modal */}
+      <ModalDialog isOpen={modOpen || Boolean(editMod)} onClose={() => { setModOpen(false); setEditMod(null); }} title={editMod ? 'Edit Module' : 'Create Module'}>
+        <form onSubmit={handleSaveMod} className="space-y-4 text-xs">
+          <div><label className="block font-semibold mb-1.5">Title</label><input required value={modForm.title} onChange={e => setModForm({ ...modForm, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
+          <div><label className="block font-semibold mb-1.5">Description</label><textarea rows={3} value={modForm.description} onChange={e => setModForm({ ...modForm, description: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block font-semibold mb-1.5">Order</label><input type="number" value={modForm.orderIndex} onChange={e => setModForm({ ...modForm, orderIndex: Number(e.target.value) })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
+            <div><label className="block font-semibold mb-1.5">Est. Minutes</label><input type="number" value={modForm.estimatedMinutes} onChange={e => setModForm({ ...modForm, estimatedMinutes: Number(e.target.value) })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
+          </div>
+          <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editMod ? 'Update Module' : 'Save Module'}</button>
         </form>
       </ModalDialog>
 
-      {/* Lesson Modal (create + edit) */}
-      <ModalDialog isOpen={lesOpen||Boolean(editLes)} onClose={()=>{setLesOpen(false);setEditLes(null);}} title={editLes?'Edit Lesson':'Author Lesson'} maxWidth="max-w-2xl">
+      {/* Lesson Modal */}
+      <ModalDialog isOpen={lesOpen || Boolean(editLes)} onClose={() => { setLesOpen(false); setEditLes(null); }} title={editLes ? 'Edit Lesson' : 'Author Lesson'} maxWidth="max-w-2xl">
         <form onSubmit={handleSaveLes} className="space-y-4 text-xs">
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block font-semibold mb-1.5">Module</label>
-              <select value={lesForm.moduleId} onChange={e=>setLesForm({...lesForm,moduleId:Number(e.target.value)})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+              <select value={lesForm.moduleId} onChange={e => setLesForm({ ...lesForm, moduleId: Number(e.target.value) })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
                 <option value="">— Select —</option>
-                {(course?.modules||[]).map(m=><option key={m.id} value={m.id}>{m.title}</option>)}
-              </select></div>
+                {(course?.modules || []).map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+              </select>
+            </div>
             <div><label className="block font-semibold mb-1.5">Type</label>
-              <select value={lesForm.lessonType} onChange={e=>setLesForm({...lesForm,lessonType:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
-                <option value="reading">📖 Reading</option><option value="laboratory">🔬 Laboratory</option><option value="coding_exercise">💻 Coding</option><option value="video">🎬 Video</option>
-              </select></div>
+              <select value={lesForm.lessonType} onChange={e => setLesForm({ ...lesForm, lessonType: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                <option value="reading">📖 Reading</option>
+                <option value="laboratory">🔬 Laboratory</option>
+                <option value="coding_exercise">💻 Coding</option>
+                <option value="video">🎬 Video</option>
+              </select>
+            </div>
           </div>
-          <div><label className="block font-semibold mb-1.5">Title</label><input required value={lesForm.title} onChange={e=>setLesForm({...lesForm,title:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-          <div><label className="block font-semibold mb-1.5">Content HTML</label><textarea rows={4} required value={lesForm.contentHtml} onChange={e=>setLesForm({...lesForm,contentHtml:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-[11px]"/></div>
-          <div><label className="block font-semibold mb-1.5">Code Snippet</label><textarea rows={3} value={lesForm.codeSnippet} onChange={e=>setLesForm({...lesForm,codeSnippet:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono bg-slate-900 text-emerald-400 text-[11px]"/></div>
+          <div><label className="block font-semibold mb-1.5">Title</label><input required value={lesForm.title} onChange={e => setLesForm({ ...lesForm, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
+          <div><label className="block font-semibold mb-1.5">Content HTML</label><textarea rows={4} required value={lesForm.contentHtml} onChange={e => setLesForm({ ...lesForm, contentHtml: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-[11px]" /></div>
+          <div><label className="block font-semibold mb-1.5">Code Snippet</label><textarea rows={3} value={lesForm.codeSnippet} onChange={e => setLesForm({ ...lesForm, codeSnippet: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono bg-slate-900 text-emerald-400 text-[11px]" /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="block font-semibold mb-1.5">Est. Minutes</label><input type="number" value={lesForm.estimatedMinutes} onChange={e=>setLesForm({...lesForm,estimatedMinutes:Number(e.target.value)})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+            <div><label className="block font-semibold mb-1.5">Est. Minutes</label><input type="number" value={lesForm.estimatedMinutes} onChange={e => setLesForm({ ...lesForm, estimatedMinutes: Number(e.target.value) })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
             <div><label className="block font-semibold mb-1.5">Status</label>
-              <select value={lesForm.publicationStatus} onChange={e=>setLesForm({...lesForm,publicationStatus:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
-                <option value="published">Published</option><option value="draft">Draft</option>
-              </select></div>
+              <select value={lesForm.publicationStatus} onChange={e => setLesForm({ ...lesForm, publicationStatus: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                <option value="published">Published</option>
+                <option value="draft">Draft</option>
+              </select>
+            </div>
           </div>
-          <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editLes?'Update Lesson':'Publish Lesson'}</button>
+          <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editLes ? 'Update Lesson' : 'Publish Lesson'}</button>
         </form>
       </ModalDialog>
 
       {/* Resource Modal */}
-      <ModalDialog isOpen={resOpen} onClose={()=>setResOpen(false)} title="Attach Resource">
+      <ModalDialog isOpen={resOpen} onClose={() => setResOpen(false)} title="Attach Resource">
         <form onSubmit={handleRes} className="space-y-4 text-xs">
-          <div><label className="block font-semibold mb-1.5">Title</label><input required value={resForm.title} onChange={e=>setResForm({...resForm,title:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+          <div><label className="block font-semibold mb-1.5">Title</label><input required value={resForm.title} onChange={e => setResForm({ ...resForm, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
           <div><label className="block font-semibold mb-1.5">Type</label>
-            <select value={resForm.resourceType} onChange={e=>setResForm({...resForm,resourceType:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
-              <option value="pdf">PDF</option><option value="packet_tracer">Packet Tracer</option><option value="worksheet">Worksheet</option><option value="code">Starter Code</option><option value="video">Video Link</option>
-            </select></div>
-          <div><label className="block font-semibold mb-1.5">URL</label><input value={resForm.externalUrl} onChange={e=>setResForm({...resForm,externalUrl:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-          <div><label className="block font-semibold mb-1.5">Description</label><textarea rows={2} value={resForm.description} onChange={e=>setResForm({...resForm,description:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+            <select value={resForm.resourceType} onChange={e => setResForm({ ...resForm, resourceType: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+              <option value="pdf">PDF</option>
+              <option value="packet_tracer">Packet Tracer</option>
+              <option value="worksheet">Worksheet</option>
+              <option value="code">Starter Code</option>
+              <option value="video">Video Link</option>
+            </select>
+          </div>
+          <div><label className="block font-semibold mb-1.5">URL</label><input value={resForm.externalUrl} onChange={e => setResForm({ ...resForm, externalUrl: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
+          <div><label className="block font-semibold mb-1.5">Description</label><textarea rows={2} value={resForm.description} onChange={e => setResForm({ ...resForm, description: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
           <button type="submit" className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg">Attach Resource</button>
         </form>
       </ModalDialog>
 
-      <ConfirmModal isOpen={Boolean(delMod)} onClose={()=>setDelMod(null)} onConfirm={handleDelMod} title="Archive Module" message={`Archive "${delMod?.title}"? Students will no longer see it.`}/>
-      <ConfirmModal isOpen={Boolean(delLes)} onClose={()=>setDelLes(null)} onConfirm={handleDelLes} title="Archive Lesson" message={`Archive "${delLes?.title}"?`}/>
-
-      {/* Lesson Preview Modal */}
-      <ModalDialog isOpen={Boolean(previewLes)} onClose={()=>setPreviewLes(null)} title={`Preview — ${previewLes?.title}`} maxWidth="max-w-2xl">
-        {previewLes&&<div className="space-y-4 text-xs">
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={previewLes.publicationStatus||'draft'}/>
-            <span className="text-slate-500 capitalize">{previewLes.lessonType?.replace(/_/g,' ')} · {previewLes.estimatedMinutes} min</span>
-          </div>
-          {previewLes.contentHtml&&(
-            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 prose prose-sm max-w-none overflow-auto max-h-64"
-              dangerouslySetInnerHTML={{__html: previewLes.contentHtml}}/>
-          )}
-          {previewLes.codeSnippet&&(
-            <div>
-              <p className="font-semibold text-slate-700 mb-1.5">Code Block / CLI Snippet</p>
-              <pre className="p-3 rounded-lg bg-slate-900 text-emerald-400 font-mono text-[11px] overflow-x-auto max-h-48">{previewLes.codeSnippet}</pre>
+      {/* AI Quiz Modal */}
+      <ModalDialog isOpen={aiOpen} onClose={() => { setAiOpen(false); setAiResults([]); setAiFile(null); }} title="🤖 AI Quiz Generator" maxWidth="max-w-2xl">
+        <div className="space-y-5 text-xs">
+          {aiResults.length === 0 ? (
+            <form onSubmit={handleAiGenerate} className="space-y-4">
+              <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800">
+                <p className="font-semibold mb-1">How it works</p>
+                <p>Upload a PDF, DOCX, or TXT file. The system reads the content and automatically generates multiple-choice questions for your question bank.</p>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1.5">Upload File (PDF, DOCX, TXT)</label>
+                <input required type="file" accept=".pdf,.docx,.txt" onChange={e => setAiFile(e.target.files[0])} className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+                {aiFile && <p className="text-slate-500 mt-1">📄 {aiFile.name} ({(aiFile.size / 1024).toFixed(1)} KB)</p>}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1.5">Topic / Subject</label>
+                  <input value={aiTopic} onChange={e => setAiTopic(e.target.value)} placeholder="e.g., Network Security, OSPF" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1.5">Number of Questions</label>
+                  <select value={aiCount} onChange={e => setAiCount(Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                    {[5, 10, 15, 20].map(n => <option key={n} value={n}>{n} questions</option>)}
+                  </select>
+                </div>
+              </div>
+              <button type="submit" disabled={aiLoading} className="w-full py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-lg disabled:opacity-60 flex items-center justify-center gap-2">
+                {aiLoading ? <span>⏳ Generating...</span> : <span>🤖 Generate {aiCount} Questions</span>}
+              </button>
+              <p className="text-center text-slate-400 text-[11px]">ℹ️ Set OPENAI_API_KEY in server .env to enable AI generation. Falls back to rule-based if not set.</p>
+            </form>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="font-bold text-slate-900">✅ {aiResults.length} questions generated!</p>
+                <button type="button" onClick={() => setAiResults([])} className="text-xs text-slate-500 hover:underline">← Start over</button>
+              </div>
+              <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                {aiResults.map((q, i) => (
+                  <div key={i} className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-mono text-[10px] font-bold text-violet-600 uppercase">Q{i + 1}</span>
+                      <span className={'text-[10px] px-1.5 py-0.5 rounded font-semibold border ' + (q.difficulty === 'Hard' ? 'bg-rose-50 text-rose-700 border-rose-200' : q.difficulty === 'Easy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200')}>
+                        {q.difficulty}
+                      </span>
+                    </div>
+                    <p className="font-semibold text-slate-900">{q.prompt}</p>
+                    <div className="mt-1.5 grid grid-cols-2 gap-1">
+                      {(q.options || []).map((o, oi) => (
+                        <p key={oi} className={'text-[11px] px-2 py-0.5 rounded ' + (o.isCorrect ? 'bg-emerald-100 text-emerald-800 font-semibold' : 'text-slate-500')}>
+                          {o.isCorrect ? '✓ ' : ''}{o.optionText}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="pt-3 border-t border-slate-200 space-y-3">
+                <p className="font-semibold text-slate-700">Save to Question Bank:</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold mb-1 text-slate-600">Question Bank ID</label>
+                    <input type="number" id="ai-bank-id" placeholder="Bank ID" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold mb-1 text-slate-600">Course ID</label>
+                    <input type="number" id="ai-course-id" defaultValue={selId} className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+                  </div>
+                </div>
+                <button type="button" disabled={aiSaving} onClick={() => {
+                  const bankId = document.getElementById('ai-bank-id')?.value;
+                  const courseId = document.getElementById('ai-course-id')?.value;
+                  handleSaveAiQuestions(bankId, courseId);
+                }} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg disabled:opacity-60">
+                  {aiSaving ? 'Saving...' : '💾 Save All to Question Bank'}
+                </button>
+              </div>
             </div>
           )}
-          {!previewLes.contentHtml&&!previewLes.codeSnippet&&(
-            <p className="text-slate-400 italic text-center py-6">No content to preview yet.</p>
-          )}
-        </div>}
+        </div>
       </ModalDialog>
+
+      {/* Lesson Preview Modal */}
+      <ModalDialog isOpen={Boolean(previewLes)} onClose={() => setPreviewLes(null)} title={'Preview — ' + (previewLes?.title || '')} maxWidth="max-w-2xl">
+        {previewLes && (
+          <div className="space-y-4 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <StatusBadge status={previewLes.publicationStatus || 'draft'} />
+              <span className="text-slate-500 capitalize">{previewLes.lessonType?.replace(/_/g, ' ')} · {previewLes.estimatedMinutes} min</span>
+            </div>
+            {previewLes.contentHtml && (
+              <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 overflow-auto max-h-64"
+                dangerouslySetInnerHTML={{ __html: previewLes.contentHtml }} />
+            )}
+            {previewLes.codeSnippet && (
+              <div>
+                <p className="font-semibold text-slate-700 mb-1.5">Code Block</p>
+                <pre className="p-3 rounded-lg bg-slate-900 text-emerald-400 font-mono text-[11px] overflow-x-auto max-h-48">{previewLes.codeSnippet}</pre>
+              </div>
+            )}
+            {!previewLes.contentHtml && !previewLes.codeSnippet && (
+              <p className="text-slate-400 italic text-center py-6">No content to preview yet.</p>
+            )}
+          </div>
+        )}
+      </ModalDialog>
+
+      <ConfirmModal isOpen={Boolean(delMod)} onClose={() => setDelMod(null)} onConfirm={handleDelMod} title="Archive Module" message={'Archive "' + (delMod?.title || '') + '"? Students will no longer see it.'} />
+      <ConfirmModal isOpen={Boolean(delLes)} onClose={() => setDelLes(null)} onConfirm={handleDelLes} title="Archive Lesson" message={'Archive "' + (delLes?.title || '') + '"?'} />
     </div>
   );
 }
 
-/* ══════════════════════════════════════════════════════════════
-   3. ASSIGNMENTS — full CRUD with edit + delete
-══════════════════════════════════════════════════════════════ */
+
 export function InstructorAssignmentsPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
@@ -1470,3 +1881,7 @@ export function InstructorClassManagementPage() {
     </div>
   );
 }
+
+/* ══════════════════════════════════════════════════════════════
+   3. ASSIGNMENTS — full CRUD with edit + delete
+══════════════════════════════════════════════════════════════ */

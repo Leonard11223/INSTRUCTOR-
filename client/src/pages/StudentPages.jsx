@@ -346,6 +346,26 @@ export function StudentDashboardPage() {
     queryFn: lmsApi.getDashboardSummary
   });
 
+  const [joinCode, setJoinCode] = React.useState('');
+  const [joinLoading, setJoinLoading] = React.useState(false);
+  const [joinResult, setJoinResult] = React.useState(null);
+  const queryClient = useQueryClient();
+
+  const handleJoinClass = async (e) => {
+    e.preventDefault();
+    if (!joinCode.trim()) return;
+    setJoinLoading(true);
+    setJoinResult(null);
+    try {
+      const res = await lmsApi.joinClassByCode({ joinCode: joinCode.trim().toUpperCase() });
+      setJoinResult({ success: true, message: res.message, classSection: res.data?.classSection });
+      setJoinCode('');
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'student'] });
+    } catch (err) {
+      setJoinResult({ success: false, message: extractErrorMessage(err) });
+    } finally { setJoinLoading(false); }
+  };
+
   if (isLoading) return <LoadingState label="Loading your personalized learning dashboard..." />;
   if (error) return <ErrorState message={extractErrorMessage(error)} onRetry={refetch} />;
 
@@ -424,6 +444,36 @@ export function StudentDashboardPage() {
             <p className="mt-1 text-xs text-slate-500">{stat.subtitle}</p>
           </div>
         ))}
+      </section>
+
+      {/* ── Join Class by Code ─────────────────────────────────────── */}
+      <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex-1">
+            <h3 className="text-sm font-bold text-blue-900">🔑 Join a Class</h3>
+            <p className="text-xs text-blue-700 mt-0.5">Enter the join code given by your instructor to enroll in a class instantly.</p>
+          </div>
+          <form onSubmit={handleJoinClass} className="flex gap-2 w-full sm:w-auto">
+            <input
+              value={joinCode}
+              onChange={e => setJoinCode(e.target.value.toUpperCase())}
+              placeholder="e.g. 3F9A2C1B"
+              maxLength={8}
+              className="flex-1 sm:w-40 px-3 py-2 rounded-lg border border-blue-300 bg-white text-sm font-mono font-bold tracking-widest text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 outline-none uppercase"
+            />
+            <button type="submit" disabled={joinLoading || !joinCode.trim()} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50 shrink-0">
+              {joinLoading ? '...' : 'Join'}
+            </button>
+          </form>
+        </div>
+        {joinResult && (
+          <div className={`mt-3 p-3 rounded-lg text-xs font-semibold ${joinResult.success ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-rose-100 text-rose-800 border border-rose-200'}`}>
+            {joinResult.success ? '✅ ' : '❌ '}{joinResult.message}
+            {joinResult.success && joinResult.classSection && (
+              <span className="ml-2 font-mono">{joinResult.classSection.sectionCode} — {joinResult.classSection.courseTitle}</span>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="space-y-4">
