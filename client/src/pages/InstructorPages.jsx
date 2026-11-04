@@ -215,7 +215,7 @@ export function InstructorCourseStudioPage() {
   const [modForm, setModForm] = useState({ title:'', description:'', orderIndex:1, estimatedMinutes:60 });
   const [lesForm, setLesForm] = useState({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'<h2>Objectives</h2>', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' });
   const [lesFile, setLesFile] = useState(null);
-  const [courseForm, setCourseForm] = useState({ title:'', code:'', description:'', category:'networking', creditUnits:3, deliveryMode:'Instructor-Led', level:'Intermediate' });
+  const [courseForm, setCourseForm] = useState({ title:'', code:'', description:'', category:'networking', creditUnits:3, deliveryMode:'Instructor-Led', level:'Intermediate', departmentId:'' });
   const [newCourseResult, setNewCourseResult] = useState(null); // holds { course, joinCode } after creation
   const [pendingClassId, setPendingClassId] = useState(null);
   const [aiFile, setAiFile] = useState(null);
@@ -230,6 +230,7 @@ export function InstructorCourseStudioPage() {
   const { data: cData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
   const { data: dData, isLoading } = useQuery({ queryKey:['course',selId], queryFn:()=>lmsApi.getCourseById(selId), enabled:Boolean(selId) });
   const { data: banksData } = useQuery({ queryKey:['question-banks'], queryFn:()=>lmsApi.listQuestionBanks() });
+  const { data: deptsData } = useQuery({ queryKey:['departments'], queryFn:()=>lmsApi.listDepartments() });
   const refresh = () => queryClient.invalidateQueries({ queryKey:['course',selId] });
 
   // Pending enrollments for the current class
@@ -379,8 +380,17 @@ export function InstructorCourseStudioPage() {
   const handleCreateCourse = async (e) => {
     e.preventDefault();
     try {
-      // 1. Create the course
-      const courseRes = await lmsApi.createCourse(courseForm);
+      // Sanitize — ensure creditUnits is a valid number
+      const payload = {
+        ...courseForm,
+        creditUnits: Number(courseForm.creditUnits) || 3,
+        departmentId: Number(courseForm.departmentId),
+        description: courseForm.description.trim().length >= 10
+          ? courseForm.description.trim()
+          : (courseForm.description.trim() + ' course.').padEnd(10, '.'),
+        publicationStatus: 'published'
+      };
+      const courseRes = await lmsApi.createCourse(payload);
       const newCourse = courseRes.data?.course;
       if (!newCourse) throw new Error('Course creation failed.');
       addToast('Course created: ' + newCourse.title);
@@ -390,7 +400,7 @@ export function InstructorCourseStudioPage() {
       // Store result to display to instructor
       setNewCourseResult({ course: newCourse, joinCode: null });
       setCourseOpen(false);
-      setCourseForm({ title:'', code:'', description:'', category:'networking', creditUnits:3, deliveryMode:'Instructor-Led', level:'Intermediate' });
+      setCourseForm({ title:'', code:'', description:'', category:'networking', creditUnits:3, deliveryMode:'Instructor-Led', level:'Intermediate', departmentId:'' });
       queryClient.invalidateQueries({ queryKey:['courses'] });
     } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
@@ -895,8 +905,21 @@ export function InstructorCourseStudioPage() {
                 )}
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold mb-1.5">Department</label>
+                <select required value={courseForm.departmentId} onChange={e => setCourseForm({ ...courseForm, departmentId: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                  <option value="">— Select department —</option>
+                  {(deptsData?.data?.departments || []).map(d => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div />
+            </div>
             <div>
-              <label className="block font-semibold mb-1.5">Description</label>
+              <label className="block font-semibold mb-1.5">Description <span className="text-slate-400 font-normal">(min. 10 characters)</span></label>
               <textarea rows={3} value={courseForm.description} onChange={e => setCourseForm({ ...courseForm, description: e.target.value })}
                 placeholder="Brief description of the course…" className="w-full px-3 py-2 rounded-lg border border-slate-300" />
             </div>
@@ -932,7 +955,7 @@ export function InstructorCourseStudioPage() {
               <div>
                 <label className="block font-semibold mb-1.5">Credit Units</label>
                 <input type="number" min="1" max="6" value={courseForm.creditUnits}
-                  onChange={e => setCourseForm({ ...courseForm, creditUnits: Number(e.target.value) })}
+                  onChange={e => setCourseForm({ ...courseForm, creditUnits: e.target.value === '' ? 3 : Number(e.target.value) })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300" />
               </div>
             </div>
