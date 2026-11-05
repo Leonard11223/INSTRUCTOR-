@@ -31,10 +31,8 @@ import {
   AcademicDashboardPage,
   DepartmentsAndProgramsPage,
   TermsManagementPage,
-  CoursesAndOfferingsPage,
-  ClassesAndSectionsPage,
-  EnrollmentManagementPage,
-  GradeApprovalsPage
+  AcademicUserManagementPage,
+  AcademicAnalyticsPage
 } from './pages/AcademicAdminPages';
 
 import {
@@ -209,34 +207,18 @@ export default function App() {
           }
         />
         <Route
-          path="/academic/courses"
+          path="/academic/users"
           element={
             <ProtectedRoute allowedRoles={['academic_admin', 'super_admin']}>
-              <CoursesAndOfferingsPage />
+              <AcademicUserManagementPage />
             </ProtectedRoute>
           }
         />
         <Route
-          path="/academic/classes"
+          path="/academic/analytics"
           element={
             <ProtectedRoute allowedRoles={['academic_admin', 'super_admin']}>
-              <ClassesAndSectionsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/academic/enrollments"
-          element={
-            <ProtectedRoute allowedRoles={['academic_admin', 'super_admin']}>
-              <EnrollmentManagementPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/academic/grade-approvals"
-          element={
-            <ProtectedRoute allowedRoles={['academic_admin', 'super_admin']}>
-              <GradeApprovalsPage />
+              <AcademicAnalyticsPage />
             </ProtectedRoute>
           }
         />

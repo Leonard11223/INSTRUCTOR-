@@ -52,6 +52,7 @@ export const lmsApi = {
   createUser: (data) => apiClient.post('/users', data).then((r) => r.data),
   updateUser: (id, data) => apiClient.put(`/users/${id}`, data).then((r) => r.data),
   deleteUser: (id) => apiClient.delete(`/users/${id}`).then((r) => r.data),
+  resetUserPassword: (id, data) => apiClient.post(`/users/${id}/reset-password`, data).then((r) => r.data),
   listRoles: () => apiClient.get('/roles').then((r) => r.data),
   updateRolePermissions: (id, permissionCodes) =>
     apiClient.put(`/roles/${id}/permissions`, { permissionCodes }).then((r) => r.data),

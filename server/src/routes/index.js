@@ -59,6 +59,7 @@ router.get('/users/:id', requireAuth, requirePermission('users:read'), iamCtrl.g
 router.post('/users', requireAuth, requirePermission('users:write'), iamCtrl.createUser);
 router.put('/users/:id', requireAuth, requirePermission('users:write'), iamCtrl.updateUser);
 router.delete('/users/:id', requireAuth, requireRole('super_admin'), iamCtrl.deleteUser);
+router.post('/users/:id/reset-password', requireAuth, requireRole('super_admin', 'academic_admin'), iamCtrl.resetUserPassword);
 
 router.get('/roles', requireAuth, iamCtrl.listRolesAndPermissions);
 router.put('/roles/:id/permissions', requireAuth, requirePermission('roles:manage'), iamCtrl.updateRolePermissions);
