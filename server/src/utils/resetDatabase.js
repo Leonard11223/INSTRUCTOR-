@@ -1,7 +1,8 @@
 const { sequelize, Sequelize } = require('../models');
 const migrations = [
   require('../migrations/20261028000001-create-lms-schema'),
-  require('../migrations/20261103000001-add-student-placements')
+  require('../migrations/20261103000001-add-student-placements'),
+  require('../migrations/20261105000001-add-joincodes-and-attendance')
 ];
 const seeder = require('../seeders/20261028000001-seed-initial-data');
 
