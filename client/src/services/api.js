@@ -53,6 +53,7 @@ export const lmsApi = {
   createUser: (data) => apiClient.post('/users', data).then((r) => r.data),
   updateUser: (id, data) => apiClient.put(`/users/${id}`, data).then((r) => r.data),
   deleteUser: (id) => apiClient.delete(`/users/${id}`).then((r) => r.data),
+  resetUserPassword: (id, data) => apiClient.post(`/users/${id}/reset-password`, data).then((r) => r.data),
   listRoles: () => apiClient.get('/roles').then((r) => r.data),
   updateRolePermissions: (id, permissionCodes) =>
     apiClient.put(`/roles/${id}/permissions`, { permissionCodes }).then((r) => r.data),
@@ -100,7 +101,12 @@ export const lmsApi = {
   updateModule: (id, data) => apiClient.put(`/modules/${id}`, data).then((r) => r.data),
   deleteModule: (id) => apiClient.delete(`/modules/${id}`).then((r) => r.data),
   getLessonById: (id) => apiClient.get(`/lessons/${id}`).then((r) => r.data),
-  createLesson: (data) => apiClient.post('/lessons', data).then((r) => r.data),
+  createLesson: (data) => {
+    if (data instanceof FormData) {
+      return apiClient.post('/lessons', data, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
+    }
+    return apiClient.post('/lessons', data).then((r) => r.data);
+  },
   updateLesson: (id, data) => apiClient.put(`/lessons/${id}`, data).then((r) => r.data),
   deleteLesson: (id) => apiClient.delete(`/lessons/${id}`).then((r) => r.data),
   listResources: (params) => apiClient.get('/resources', { params }).then((r) => r.data),
@@ -200,6 +206,13 @@ export const lmsApi = {
   getJoinCodeInfo: (classId) => apiClient.get(`/classes/${classId}/join-code`).then((r) => r.data),
   generateJoinCode: (classId, data) => apiClient.post(`/classes/${classId}/join-code`, data).then((r) => r.data),
   joinClassByCode: (data) => apiClient.post('/join-class', data).then((r) => r.data),
+  getPendingEnrollments: (classId) => apiClient.get(`/classes/${classId}/pending-enrollments`).then((r) => r.data),
+  approveEnrollment: (membershipId) => apiClient.post(`/enrollments/${membershipId}/approve`).then((r) => r.data),
+  rejectEnrollment: (membershipId, data) => apiClient.post(`/enrollments/${membershipId}/reject`, data).then((r) => r.data),
+
+  // ── Lesson File Attachment ────────────────────────────────────────────────
+  attachFileToLesson: (lessonId, formData) =>
+    apiClient.post(`/lessons/${lessonId}/attach-file`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data),
   listMessages: () => apiClient.get('/messages').then((r) => r.data),
   sendMessage: (data) => apiClient.post('/messages', data).then((r) => r.data),
   listNotifications: () => apiClient.get('/notifications').then((r) => r.data),

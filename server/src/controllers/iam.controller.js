@@ -530,12 +530,66 @@ async function deleteUser(req, res, next) {
   }
 }
 
+async function resetUserPassword(req, res, next) {
+  try {
+    const targetUserId = Number(req.params.id);
+    const { newPassword } = req.body;
+
+    // Use provided password or default
+    const passwordToSet = newPassword || 'Password@123';
+
+    const user = await User.findByPk(targetUserId, {
+      include: [{ model: Role, as: 'roles' }]
+    });
+
+    if (!user) throw new AppError('User not found.', 404, 'USER_NOT_FOUND');
+
+    // Block resetting super_admin passwords
+    const isTargetSuperAdmin = (user.roles || []).some((r) => r.slug === 'super_admin');
+    if (isTargetSuperAdmin) {
+      throw new AppError(
+        'Super Administrator account passwords cannot be reset by anyone other than the account holder.',
+        403,
+        'SUPER_ADMIN_PASSWORD_LOCKED'
+      );
+    }
+
+    const newHash = await argon2.hash(passwordToSet, HASH_OPTS);
+    await user.update({
+      passwordHash: newHash,
+      passwordResetToken: null,
+      passwordResetExpires: null,
+      failedLoginAttempts: 0,
+      lockedUntil: null
+    });
+
+    await recordAudit({
+      req,
+      action: 'USER_PASSWORD_RESET',
+      category: 'user',
+      severity: 'warning',
+      entityType: 'User',
+      entityId: user.id,
+      metadata: { email: user.email, resetBy: req.user.email }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Password for "${user.email}" has been reset.`,
+      data: { temporaryPassword: passwordToSet }
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   listUsers,
   getUserById,
   createUser,
   updateUser,
   deleteUser,
+  resetUserPassword,
   listRolesAndPermissions,
   updateRolePermissions,
   listSystemSettings,

@@ -467,10 +467,15 @@ export function StudentDashboardPage() {
           </form>
         </div>
         {joinResult && (
-          <div className={`mt-3 p-3 rounded-lg text-xs font-semibold ${joinResult.success ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-rose-100 text-rose-800 border border-rose-200'}`}>
-            {joinResult.success ? '✅ ' : '❌ '}{joinResult.message}
-            {joinResult.success && joinResult.classSection && (
-              <span className="ml-2 font-mono">{joinResult.classSection.sectionCode} — {joinResult.classSection.courseTitle}</span>
+          <div className={`mt-3 p-3 rounded-lg text-xs font-semibold ${joinResult.success ? 'bg-amber-50 border border-amber-200 text-amber-900' : 'bg-rose-100 text-rose-800 border border-rose-200'}`}>
+            {joinResult.success ? (
+              <div className="space-y-1">
+                <p>⏳ <strong>Enrollment Request Submitted!</strong></p>
+                <p>Your request to join <strong>{joinResult.classSection?.courseTitle || joinResult.classSection?.sectionCode}</strong> is pending instructor approval.</p>
+                <p className="text-[11px] opacity-80">You will receive a notification once the instructor approves your request.</p>
+              </div>
+            ) : (
+              <p>❌ {joinResult.message}</p>
             )}
           </div>
         )}
