@@ -61,6 +61,8 @@ import {
 import {
   TaDashboardPage,
   TaSubmissionsReviewPage,
+  TaClassesPage,
+  TaResourcesPage,
   SharedAnnouncementsPage,
   SharedDiscussionsPage,
   SharedMessagesPage,
@@ -334,7 +336,7 @@ export default function App() {
           path="/ta/classes"
           element={
             <ProtectedRoute allowedRoles={['teaching_assistant']}>
-              <TaDashboardPage />
+              <TaClassesPage />
             </ProtectedRoute>
           }
         />
@@ -350,7 +352,7 @@ export default function App() {
           path="/ta/resources"
           element={
             <ProtectedRoute allowedRoles={['teaching_assistant']}>
-              <InstructorCourseStudioPage />
+              <TaResourcesPage />
             </ProtectedRoute>
           }
         />

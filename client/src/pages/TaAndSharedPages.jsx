@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Users, ClipboardCheck, Flag, MessageSquare, Megaphone, Send,
   FileSpreadsheet, Download, Plus, CheckCircle2, AlertTriangle,
-  Pencil, Trash2, Search
+  Pencil, Trash2, Search, BookOpen
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { lmsApi, extractErrorMessage } from '../services/api';
@@ -566,9 +566,15 @@ export function SharedDiscussionsPage() {
 export function SharedMessagesPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
-  const [recipientId, setRecipientId] = useState(3);
+  const { user } = useAuth();
+  const [recipientId, setRecipientId] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+
+  const { data: usersData } = useQuery({
+    queryKey: ['users-messaging'],
+    queryFn: () => lmsApi.listUsers({ status: 'active' }).catch(() => ({ data: { users: [] } }))
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['messages'],
@@ -577,6 +583,7 @@ export function SharedMessagesPage() {
 
   const handleSend = async (e) => {
     e.preventDefault();
+    if (!recipientId) { addToast('Please select a recipient.', 'error'); return; }
     try {
       await lmsApi.sendMessage({ recipientId: Number(recipientId), subject, body });
       setSubject('');
@@ -589,9 +596,10 @@ export function SharedMessagesPage() {
   };
 
   const conversations = data?.data?.conversations || [];
+  const allUsers = (usersData?.data?.users || []).filter(u => u.id !== user?.id);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-8">
       <PageHeader
         badge="Private Communications"
         title="Direct Academic Messaging"
@@ -603,7 +611,11 @@ export function SharedMessagesPage() {
           {isLoading ? (
             <LoadingState />
           ) : conversations.length === 0 ? (
-            <p className="text-xs text-slate-500">No conversations yet.</p>
+            <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
+              <MessageSquare className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+              <p className="text-sm font-semibold text-slate-500">No conversations yet.</p>
+              <p className="text-xs text-slate-400 mt-1">Send a message to start a conversation.</p>
+            </div>
           ) : (
             conversations.map((conv) => (
               <div key={conv.id} className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
@@ -615,10 +627,8 @@ export function SharedMessagesPage() {
                 </div>
                 <div className="space-y-2">
                   {(conv.messages || []).map((msg) => (
-                    <div key={msg.id} className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs">
-                      <p className="font-bold text-slate-900">
-                        {msg.sender?.firstName} {msg.sender?.lastName}
-                      </p>
+                    <div key={msg.id} className={'p-3 rounded-lg border text-xs ' + (msg.sender?.id === user?.id ? 'bg-blue-50 border-blue-100 ml-8' : 'bg-slate-50 border-slate-200')}>
+                      <p className="font-bold text-slate-900">{msg.sender?.firstName} {msg.sender?.lastName}</p>
                       <p className="text-slate-700 mt-0.5">{msg.body}</p>
                     </div>
                   ))}
@@ -633,14 +643,17 @@ export function SharedMessagesPage() {
           <div>
             <label className="block font-semibold mb-1">Recipient</label>
             <select
+              required
               value={recipientId}
               onChange={(e) => setRecipientId(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
             >
-              <option value={3}>Prof. Elena Vance (Instructor)</option>
-              <option value={5}>Liam Reyes (Teaching Assistant)</option>
-              <option value={2}>Clarissa Thorne (Academic Admin)</option>
-              <option value={6}>Maya Lin (Student)</option>
+              <option value="">— Select recipient —</option>
+              {allUsers.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.firstName} {u.lastName} ({u.primaryRole?.replace('_', ' ')})
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -650,7 +663,7 @@ export function SharedMessagesPage() {
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Coursework inquiry..."
-              className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
           <div>
@@ -660,7 +673,7 @@ export function SharedMessagesPage() {
               rows={4}
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
           <button
@@ -675,6 +688,7 @@ export function SharedMessagesPage() {
     </div>
   );
 }
+
 
 export function SharedReportsPage() {
   const { addToast } = useToast();
@@ -923,3 +937,177 @@ export function SharedReportsPage() {
   );
 }
 
+
+/* ══════════════════════════════════════════════════════════════
+   TA CLASSES PAGE — view assigned classes and rosters
+══════════════════════════════════════════════════════════════ */
+export function TaClassesPage() {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['classes'],
+    queryFn: lmsApi.listClasses
+  });
+
+  if (isLoading) return <LoadingState label="Loading your assigned classes..." />;
+  if (error) return <ErrorState message={extractErrorMessage(error)} onRetry={refetch} />;
+
+  const classes = data?.data?.classes || [];
+
+  return (
+    <div className="space-y-6 pb-8">
+      <PageHeader
+        badge="Assigned Classes & Roster"
+        title="My Assigned Classes"
+        subtitle="View all class sections you are assigned to support as Teaching Assistant."
+      />
+
+      {classes.length === 0 ? (
+        <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
+          <Users className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <p className="text-sm font-semibold text-slate-500">No classes assigned yet.</p>
+          <p className="text-xs text-slate-400 mt-1">Contact your instructor or administrator to get assigned to a class.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {classes.map((cls) => (
+            <div key={cls.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow transition-shadow">
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div>
+                  <p className="text-xs font-bold font-mono text-blue-700">{cls.sectionCode}</p>
+                  <h3 className="text-sm font-bold text-slate-900 mt-0.5">{cls.courseOffering?.course?.title || cls.name}</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {cls.courseOffering?.semester?.name} · {cls.schedule || 'No schedule'} · {cls.room || 'No room'}
+                  </p>
+                </div>
+                <StatusBadge status={cls.status || 'active'} />
+              </div>
+
+              <div className="flex items-center gap-4 text-xs text-slate-500 mb-4">
+                <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {cls.memberships?.length || 0} / {cls.capacity} students</span>
+              </div>
+
+              {/* Roster */}
+              {(cls.memberships || []).length > 0 && (
+                <div className="border-t border-slate-100 pt-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Student Roster</p>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {(cls.memberships || []).map((m) => (
+                      <div key={m.id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-slate-50">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-700 shrink-0">
+                            {m.student?.firstName?.[0]}{m.student?.lastName?.[0]}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-slate-900">{m.student?.firstName} {m.student?.lastName}</p>
+                            <p className="text-slate-400 font-mono">{m.student?.studentNumber}</p>
+                          </div>
+                        </div>
+                        <StatusBadge status={m.status} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TA RESOURCES PAGE — view learning resources for assigned classes
+══════════════════════════════════════════════════════════════ */
+export function TaResourcesPage() {
+  const { data: classesData } = useQuery({ queryKey: ['classes'], queryFn: lmsApi.listClasses });
+  const [selClassId, setSelClassId] = useState(null);
+
+  const classes = classesData?.data?.classes || [];
+
+  const { data: classDetail, isLoading } = useQuery({
+    queryKey: ['class-detail', selClassId],
+    queryFn: () => lmsApi.getClassById(selClassId),
+    enabled: Boolean(selClassId)
+  });
+
+  const course = classDetail?.data?.classSection?.courseOffering?.course;
+  const modules = course?.modules || [];
+
+  return (
+    <div className="space-y-6 pb-8">
+      <PageHeader
+        badge="Learning Resources"
+        title="Course Learning Materials"
+        subtitle="Access modules, lessons, and resources for your assigned classes."
+      />
+
+      {/* Class selector */}
+      {classes.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {classes.map((c) => (
+            <button key={c.id} type="button" onClick={() => setSelClassId(c.id)}
+              className={'px-4 py-2 rounded-lg text-xs font-bold border transition-colors ' +
+                (selClassId === c.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50')}>
+              {c.sectionCode}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!selClassId ? (
+        <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
+          <p className="text-sm font-semibold text-slate-500">Select a class above to view its learning materials.</p>
+        </div>
+      ) : isLoading ? <LoadingState /> : (
+        <div className="space-y-4">
+          {modules.length === 0 ? (
+            <div className="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center">
+              <p className="text-xs text-slate-400">No modules published yet for this class.</p>
+            </div>
+          ) : (
+            modules.map((mod, mi) => (
+              <div key={mod.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">{mi + 1}</span>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">{mod.title}</h3>
+                    {mod.description && <p className="text-[11px] text-slate-500">{mod.description}</p>}
+                  </div>
+                  <div className="ml-auto flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500">{mod.lessons?.length || 0} lessons</span>
+                    <StatusBadge status={mod.publicationStatus || 'draft'} />
+                  </div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {(mod.lessons || []).length === 0 ? (
+                    <p className="px-5 py-3 text-xs text-slate-400 italic">No lessons yet.</p>
+                  ) : (
+                    (mod.lessons || []).map((les, li) => (
+                      <div key={les.id} className="px-5 py-3.5 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-base shrink-0">
+                            {les.lessonType === 'laboratory' ? '🔬' : les.lessonType === 'video' ? '🎬' : les.lessonType === 'coding_exercise' ? '💻' : '📖'}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-slate-900 truncate">{mi + 1}.{li + 1} {les.title}</p>
+                            <p className="text-[11px] text-slate-500 capitalize mt-0.5">{les.lessonType?.replace(/_/g, ' ')} · {les.estimatedMinutes} min</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <StatusBadge status={les.publicationStatus || 'draft'} />
+                          {(les.resources || []).length > 0 && (
+                            <span className="text-[11px] text-blue-600 font-semibold">{les.resources.length} file{les.resources.length !== 1 ? 's' : ''}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

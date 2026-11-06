@@ -83,7 +83,17 @@ async function updateModule(req, res, next) {
 
 async function reorderModules(req, res, next) {
   try {
-    const { orderedIds } = req.body;
+    // Accept both { orderedIds: [id1,id2,...] } and { modules: [{id, orderIndex},...] }
+    const { orderedIds, modules: modulesPayload } = req.body;
+
+    if (modulesPayload && Array.isArray(modulesPayload)) {
+      // Client sends [{id, orderIndex}] — use provided orderIndex values
+      for (const item of modulesPayload) {
+        await Module.update({ orderIndex: item.orderIndex }, { where: { id: Number(item.id) } });
+      }
+      return res.status(200).json({ success: true, message: 'Modules reordered.' });
+    }
+
     if (!Array.isArray(orderedIds)) throw new AppError('orderedIds array required.', 400);
 
     for (let i = 0; i < orderedIds.length; i += 1) {

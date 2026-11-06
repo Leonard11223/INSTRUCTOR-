@@ -204,7 +204,7 @@ async function replyToDiscussionThread(req, res, next) {
       allowStudent: true
     });
 
-    const isInstructorOrTa = ['instructor', 'teaching_assistant'].includes(req.user.primaryRole);
+    const isInstructorOrTa = ['instructor'].includes(req.user.primaryRole);
 
     const post = await DiscussionPost.create({
       threadId: thread.id,

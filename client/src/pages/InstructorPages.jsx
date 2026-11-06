@@ -1127,15 +1127,16 @@ export function InstructorAssignmentsPage() {
   const [extForm, setExtForm] = useState({ studentId:'', newDueDate:'', reason:'' });
   const [csvFile, setCsvFile] = useState(null);
   const [csvCatId, setCsvCatId] = useState('');
+  const [csvClassId, setCsvClassId] = useState('');
   const emptyForm = { classId:'', courseId:'', title:'', assignmentType:'laboratory', instructions:'', dueDate:'', maxScore:100, starterCode:'// Starter\n', rubricCriteria:[{criterionName:'Functional Accuracy',maxPoints:50},{criterionName:'Documentation',maxPoints:50}] };
   const [form, setForm] = useState(emptyForm);
 
   const { data: classesData } = useQuery({ queryKey:['classes'], queryFn:lmsApi.listClasses });
   const { data: coursesData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
-  const { data, isLoading } = useQuery({ queryKey:['assignments'], queryFn:()=>lmsApi.listAssignments() });
+  const { data, isLoading, error } = useQuery({ queryKey:['assignments'], queryFn:()=>lmsApi.listAssignments() });
 
   const openCreate = () => { setForm(emptyForm); setCreateOpen(true); };
-  const openEdit = (a) => { setForm({ classId:a.classId||'', courseId:a.courseId||'', title:a.title, assignmentType:a.assignmentType, instructions:a.instructions||'', dueDate:a.dueDate?a.dueDate.slice(0,10):'', maxScore:a.maxScore, starterCode:a.starterCode||'', rubricCriteria:[] }); setEditItem(a); };
+  const openEdit = (a) => { setForm({ classId:a.classId||'', courseId:a.courseId||'', title:a.title, assignmentType:a.assignmentType, instructions:a.instructions||'', dueDate:a.dueDate?a.dueDate.slice(0,10):'', maxScore:a.maxScore, starterCode:a.starterCode||'', rubricCriteria: a.rubric?.criteria ? a.rubric.criteria.map(c=>({criterionName:c.criterionName,maxPoints:c.maxPoints})) : [] }); setEditItem(a); };
 
   const handleExtend = async (e) => {
     e.preventDefault();
@@ -1149,16 +1150,13 @@ export function InstructorAssignmentsPage() {
 
   const handleCsvImport = async (e) => {
     e.preventDefault();
-    if (!csvFile || !csvCatId) { addToast('Select a file and grade category.', 'error'); return; }
+    if (!csvFile || !csvCatId || !csvClassId) { addToast('Select a class, grade category, and file.', 'error'); return; }
     const fd = new FormData();
     fd.append('file', csvFile);
     fd.append('gradeCategoryId', csvCatId);
-    // Use classId from first selected class or prompt
-    const classId = allClasses[0]?.id;
-    if (!classId) { addToast('No classes available.', 'error'); return; }
     try {
-      const res = await lmsApi.importGradesCsv(classId, fd);
-      addToast(res.message); setCsvOpen(false); setCsvFile(null);
+      const res = await lmsApi.importGradesCsv(Number(csvClassId), fd);
+      addToast(res.message); setCsvOpen(false); setCsvFile(null); setCsvClassId('');
       queryClient.invalidateQueries({ queryKey: ['gradebook'] });
     } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
@@ -1180,6 +1178,9 @@ export function InstructorAssignmentsPage() {
   const allClasses = classesData?.data?.classes||[];
   const allCourses = coursesData?.data?.courses||[];
   const all = data?.data?.assignments||[];
+
+  if (error) return <ErrorState message={extractErrorMessage(error)} onRetry={()=>queryClient.invalidateQueries({queryKey:['assignments']})} />;
+
   const typeBadge = { laboratory:'bg-violet-50 text-violet-700 border-violet-200', programming:'bg-blue-50 text-blue-700 border-blue-200', network_config:'bg-emerald-50 text-emerald-700 border-emerald-200', project_milestone:'bg-amber-50 text-amber-700 border-amber-200' };
   const filtered = all.filter(a=>(filter==='all'||a.assignmentType===filter)&&(!search||a.title.toLowerCase().includes(search.toLowerCase())));
 
@@ -1282,6 +1283,11 @@ export function InstructorAssignmentsPage() {
             <p className="font-mono">studentNumber,score,feedback</p>
             <p className="font-mono">2024-00001,92,Good work</p>
           </div>
+          <div><label className="block font-semibold mb-1.5">Class Section</label>
+            <select required value={csvClassId} onChange={e=>setCsvClassId(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+              <option value="">— Select class —</option>
+              {allClasses.map(c=><option key={c.id} value={c.id}>{c.sectionCode}</option>)}
+            </select></div>
           <div><label className="block font-semibold mb-1.5">Grade Category</label>
             <select required value={csvCatId} onChange={e=>setCsvCatId(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
               <option value="">— Select category —</option>
@@ -1314,7 +1320,7 @@ export function InstructorSubmissionsPage() {
   const [batchScore, setBatchScore] = useState(90);
   const [batchFeedback, setBatchFeedback] = useState('');
 
-  const { data, isLoading } = useQuery({ queryKey:['submissions'], queryFn:()=>lmsApi.listSubmissions() });
+  const { data, isLoading, error } = useQuery({ queryKey:['submissions'], queryFn:()=>lmsApi.listSubmissions() });
 
   const handleGrade = async (returnForRevision=false) => {
     if (!sel) return;
@@ -1343,6 +1349,9 @@ export function InstructorSubmissionsPage() {
   const toggleSelect = (id) => setBatchSelected(p => p.includes(id) ? p.filter(x=>x!==id) : [...p, id]);
 
   const all = data?.data?.submissions||[];
+
+  if (error) return <ErrorState message={extractErrorMessage(error)} onRetry={()=>queryClient.invalidateQueries({queryKey:['submissions']})} />;
+
   const counts = { all:all.length, submitted:all.filter(s=>s.status==='submitted').length, late:all.filter(s=>s.status==='late').length, under_review:all.filter(s=>s.status==='under_review').length, graded:all.filter(s=>s.status==='graded').length, flagged:all.filter(s=>s.flaggedForInstructorReview).length };
   const filtered = all.filter(s=>{
     const mf=filter==='all'?true:filter==='flagged'?s.flaggedForInstructorReview:s.status===filter;
