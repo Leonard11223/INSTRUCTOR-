@@ -1111,3 +1111,8 @@ export function TaResourcesPage() {
     </div>
   );
 }
+
+/* Aliases for RyanClaud team routes — point to existing implementations */
+export { TaClassesPage as TaClassRosterPage };
+export { TaClassesPage as TaStudentProgressPage };
+export { TaClassesPage as TaStudentActivityPage };

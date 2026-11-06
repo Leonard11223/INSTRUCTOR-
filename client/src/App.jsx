@@ -339,10 +339,7 @@ export default function App() {
           path="/ta/classes"
           element={
             <ProtectedRoute allowedRoles={['teaching_assistant']}>
-<<<<<<< HEAD
               <TaClassesPage />
-=======
-              <TaClassRosterPage />
             </ProtectedRoute>
           }
         />
@@ -359,7 +356,6 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={['teaching_assistant']}>
               <TaStudentActivityPage />
->>>>>>> a2ea528ec9da6727c57f4e2d418a6c27ee00b15c
             </ProtectedRoute>
           }
         />
@@ -372,7 +368,6 @@ export default function App() {
           }
         />
         <Route
-<<<<<<< HEAD
           path="/ta/resources"
           element={
             <ProtectedRoute allowedRoles={['teaching_assistant']}>
@@ -380,9 +375,6 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-=======
->>>>>>> a2ea528ec9da6727c57f4e2d418a6c27ee00b15c
           path="/ta/discussions"
           element={
             <ProtectedRoute allowedRoles={['teaching_assistant']}>
