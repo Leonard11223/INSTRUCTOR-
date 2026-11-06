@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -1183,29 +1183,37 @@ export function InstructorAssignmentsPage() {
   const typeBadge = { laboratory:'bg-violet-50 text-violet-700 border-violet-200', programming:'bg-blue-50 text-blue-700 border-blue-200', network_config:'bg-emerald-50 text-emerald-700 border-emerald-200', project_milestone:'bg-amber-50 text-amber-700 border-amber-200' };
   const filtered = all.filter(a=>(filter==='all'||a.assignmentType===filter)&&(!search||a.title.toLowerCase().includes(search.toLowerCase())));
 
-  const AssignmentForm = () => (
+  const assignmentFormContent = (
     <form onSubmit={handleSave} className="space-y-4 text-xs">
       <div className="grid grid-cols-2 gap-3">
         <div><label className="block font-semibold mb-1.5">Class Section</label>
-          <select required value={form.classId} onChange={e=>setForm({...form,classId:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select required value={form.classId} onChange={e=>setForm(p=>({...p,classId:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="">— Select —</option>{allClasses.map(c=><option key={c.id} value={c.id}>{c.sectionCode}</option>)}
           </select></div>
         <div><label className="block font-semibold mb-1.5">Course</label>
-          <select required value={form.courseId} onChange={e=>setForm({...form,courseId:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select required value={form.courseId} onChange={e=>setForm(p=>({...p,courseId:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="">— Select —</option>{allCourses.map(c=><option key={c.id} value={c.id}>{c.code} — {c.title}</option>)}
           </select></div>
       </div>
-      <div><label className="block font-semibold mb-1.5">Title</label><input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+      <div><label className="block font-semibold mb-1.5">Title</label>
+        <input required value={form.title} onChange={e=>setForm(p=>({...p,title:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <div><label className="block font-semibold mb-1.5">Type</label>
-          <select value={form.assignmentType} onChange={e=>setForm({...form,assignmentType:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select value={form.assignmentType} onChange={e=>setForm(p=>({...p,assignmentType:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="laboratory">Laboratory</option><option value="programming">Programming</option><option value="network_config">Network Config</option><option value="project_milestone">Project</option>
           </select></div>
-        <div><label className="block font-semibold mb-1.5">Due Date</label><input type="date" required value={form.dueDate} onChange={e=>setForm({...form,dueDate:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+        <div><label className="block font-semibold mb-1.5">Due Date</label><input type="date" required value={form.dueDate} onChange={e=>setForm(p=>({...p,dueDate:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
       </div>
-      <div><label className="block font-semibold mb-1.5">Max Score</label><input type="number" value={form.maxScore} onChange={e=>setForm({...form,maxScore:Number(e.target.value)})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-      <div><label className="block font-semibold mb-1.5">Instructions</label><textarea required rows={3} value={form.instructions} onChange={e=>setForm({...form,instructions:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-      <div><label className="block font-semibold mb-1.5">Starter Code</label><textarea rows={3} value={form.starterCode} onChange={e=>setForm({...form,starterCode:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono"/></div>
+      <div><label className="block font-semibold mb-1.5">Max Score</label>
+        <input type="number" value={form.maxScore} onChange={e=>setForm(p=>({...p,maxScore:Number(e.target.value)}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/>
+      </div>
+      <div><label className="block font-semibold mb-1.5">Instructions</label>
+        <textarea required rows={3} value={form.instructions} onChange={e=>setForm(p=>({...p,instructions:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/>
+      </div>
+      <div><label className="block font-semibold mb-1.5">Starter Code</label>
+        <textarea rows={3} value={form.starterCode} onChange={e=>setForm(p=>({...p,starterCode:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono"/>
+      </div>
       <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editItem?'Update Assignment':'Publish Assignment'}</button>
     </form>
   );
@@ -1251,8 +1259,8 @@ export function InstructorAssignmentsPage() {
           );
         })}</div>
       )}
-      <ModalDialog isOpen={createOpen} onClose={()=>setCreateOpen(false)} title="Create Assignment" maxWidth="max-w-xl"><AssignmentForm/></ModalDialog>
-      <ModalDialog isOpen={Boolean(editItem)} onClose={()=>setEditItem(null)} title="Edit Assignment" maxWidth="max-w-xl"><AssignmentForm/></ModalDialog>
+      <ModalDialog isOpen={createOpen} onClose={()=>setCreateOpen(false)} title="Create Assignment" maxWidth="max-w-xl">{assignmentFormContent}</ModalDialog>
+      <ModalDialog isOpen={Boolean(editItem)} onClose={()=>setEditItem(null)} title="Edit Assignment" maxWidth="max-w-xl">{assignmentFormContent}</ModalDialog>
       <ConfirmModal isOpen={Boolean(delItem)} onClose={()=>setDelItem(null)} onConfirm={handleDelete} title="Delete Assignment" message={`Delete "${delItem?.title}"? This cannot be undone.`}/>
 
       {/* Extension Modal */}
@@ -1502,40 +1510,53 @@ export function InstructorAssessmentsPage() {
 
   const diffCls = { Easy:'bg-emerald-50 text-emerald-700 border-emerald-200', Medium:'bg-amber-50 text-amber-700 border-amber-200', Hard:'bg-rose-50 text-rose-700 border-rose-200' };
 
-  const AssessmentForm = () => (
+  const assessmentFormContent = (
     <form onSubmit={handleSaveA} className="space-y-4 text-xs">
       <div className="grid grid-cols-2 gap-3">
         <div><label className="block font-semibold mb-1.5">Class</label>
-          <select required value={aForm.classId} onChange={e=>setAForm({...aForm,classId:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select required value={aForm.classId} onChange={e=>setAForm(p=>({...p,classId:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="">— Select —</option>{allClasses.map(c=><option key={c.id} value={c.id}>{c.sectionCode}</option>)}
           </select></div>
         <div><label className="block font-semibold mb-1.5">Course</label>
-          <select required value={aForm.courseId} onChange={e=>setAForm({...aForm,courseId:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select required value={aForm.courseId} onChange={e=>setAForm(p=>({...p,courseId:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="">— Select —</option>{allCourses.map(c=><option key={c.id} value={c.id}>{c.code}</option>)}
           </select></div>
       </div>
-      <div><label className="block font-semibold mb-1.5">Title</label><input required value={aForm.title} onChange={e=>setAForm({...aForm,title:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+      <div><label className="block font-semibold mb-1.5">Title</label>
+        <input required value={aForm.title} onChange={e=>setAForm(p=>({...p,title:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/>
+      </div>
       <div className="grid grid-cols-3 gap-3">
         <div><label className="block font-semibold mb-1.5">Type</label>
-          <select value={aForm.assessmentType} onChange={e=>setAForm({...aForm,assessmentType:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select value={aForm.assessmentType} onChange={e=>setAForm(p=>({...p,assessmentType:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="quiz">Quiz</option><option value="midterm">Midterm</option><option value="final">Final Exam</option><option value="lab_practical">Lab Practical</option>
           </select></div>
-        <div><label className="block font-semibold mb-1.5">Time Limit (min)</label><input type="number" value={aForm.timeLimitMinutes} onChange={e=>setAForm({...aForm,timeLimitMinutes:Number(e.target.value)})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-        <div><label className="block font-semibold mb-1.5">Max Score</label><input type="number" value={aForm.maxScore} onChange={e=>setAForm({...aForm,maxScore:Number(e.target.value)})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+        <div><label className="block font-semibold mb-1.5">Time Limit (min)</label>
+          <input type="number" value={aForm.timeLimitMinutes} onChange={e=>setAForm(p=>({...p,timeLimitMinutes:Number(e.target.value)}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/>
+        </div>
+        <div><label className="block font-semibold mb-1.5">Max Score</label>
+          <input type="number" value={aForm.maxScore} onChange={e=>setAForm(p=>({...p,maxScore:Number(e.target.value)}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/>
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div><label className="block font-semibold mb-1.5">Open Date</label><input type="date" value={aForm.openDate} onChange={e=>setAForm({...aForm,openDate:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-        <div><label className="block font-semibold mb-1.5">Close Date</label><input type="date" value={aForm.closeDate} onChange={e=>setAForm({...aForm,closeDate:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+        <div><label className="block font-semibold mb-1.5">Open Date</label>
+          <input type="date" value={aForm.openDate} onChange={e=>setAForm(p=>({...p,openDate:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/>
+        </div>
+        <div><label className="block font-semibold mb-1.5">Close Date</label>
+          <input type="date" value={aForm.closeDate} onChange={e=>setAForm(p=>({...p,closeDate:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/>
+        </div>
       </div>
-      <div><label className="block font-semibold mb-1.5">Instructions</label><textarea rows={2} value={aForm.instructions} onChange={e=>setAForm({...aForm,instructions:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+      <div><label className="block font-semibold mb-1.5">Instructions</label>
+        <textarea rows={2} value={aForm.instructions} onChange={e=>setAForm(p=>({...p,instructions:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/>
+      </div>
       <div className="flex gap-4">
-        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer"><input type="checkbox" checked={aForm.randomizeQuestions} onChange={e=>setAForm({...aForm,randomizeQuestions:e.target.checked})} className="rounded"/> Randomize Questions</label>
-        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer"><input type="checkbox" checked={aForm.autoPublishResults} onChange={e=>setAForm({...aForm,autoPublishResults:e.target.checked})} className="rounded"/> Auto-publish Results</label>
+        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer"><input type="checkbox" checked={aForm.randomizeQuestions} onChange={e=>setAForm(p=>({...p,randomizeQuestions:e.target.checked}))} className="rounded"/> Randomize Questions</label>
+        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer"><input type="checkbox" checked={aForm.autoPublishResults} onChange={e=>setAForm(p=>({...p,autoPublishResults:e.target.checked}))} className="rounded"/> Auto-publish Results</label>
       </div>
       <div><label className="block font-semibold mb-1.5">Status</label>
-        <select value={aForm.publicationStatus} onChange={e=>setAForm({...aForm,publicationStatus:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+        <select value={aForm.publicationStatus} onChange={e=>setAForm(p=>({...p,publicationStatus:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
           <option value="draft">Draft</option><option value="published">Published</option>
-        </select></div>
+        </select>
+      </div>
       <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editA?'Update Assessment':'Create Assessment'}</button>
     </form>
   );
@@ -1613,7 +1634,7 @@ export function InstructorAssessmentsPage() {
       ))}
 
       {/* Create/Edit Assessment Modal */}
-      <ModalDialog isOpen={aOpen||Boolean(editA)} onClose={()=>{setAOpen(false);setEditA(null);}} title={editA?'Edit Assessment':'Create Assessment'} maxWidth="max-w-2xl"><AssessmentForm/></ModalDialog>
+      <ModalDialog isOpen={aOpen||Boolean(editA)} onClose={()=>{setAOpen(false);setEditA(null);}} title={editA?'Edit Assessment':'Create Assessment'} maxWidth="max-w-2xl">{assessmentFormContent}</ModalDialog>
 
       {/* Create Question Bank Modal */}
       <ModalDialog isOpen={bOpen} onClose={()=>setBOpen(false)} title="Create Question Bank">

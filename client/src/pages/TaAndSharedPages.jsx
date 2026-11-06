@@ -307,28 +307,45 @@ export function SharedAnnouncementsPage() {
     normal:   { card:'border-slate-200 bg-white',      badge:'bg-slate-100 text-slate-700 border-slate-200',dot:'bg-slate-400' },
   };
 
-  const AnnouncementForm = () => (
+  const announcementFormContent = (
     <form onSubmit={handleSave} className="space-y-4 text-xs">
       <div className="grid grid-cols-2 gap-3">
         <div><label className="block font-semibold mb-1.5">Scope</label>
-          <select value={form.scope} onChange={e=>setForm({...form,scope:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select value={form.scope} onChange={e=>setForm(p=>({...p,scope:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="class">Class Section</option><option value="course">Course-Wide</option><option value="department">Department</option><option value="institution">Institution-Wide</option>
           </select></div>
         <div><label className="block font-semibold mb-1.5">Priority</label>
-          <select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select value={form.priority} onChange={e=>setForm(p=>({...p,priority:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="normal">Normal</option><option value="important">Important</option><option value="urgent">Urgent</option>
           </select></div>
       </div>
       {form.scope==='class'&&<div><label className="block font-semibold mb-1.5">Class Section</label>
-        <select required value={form.classId} onChange={e=>setForm({...form,classId:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+        <select required value={form.classId} onChange={e=>setForm(p=>({...p,classId:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
           <option value="">— Select class —</option>{allClasses.map(c=><option key={c.id} value={c.id}>{c.sectionCode}</option>)}
         </select></div>}
-      <div><label className="block font-semibold mb-1.5">Title</label><input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-      <div><label className="block font-semibold mb-1.5">Content</label><textarea required rows={4} value={form.content} onChange={e=>setForm({...form,content:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
-      <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer"><input type="checkbox" checked={form.isPinned} onChange={e=>setForm({...form,isPinned:e.target.checked})} className="rounded"/> 📌 Pin this announcement</label>
+      <div>
+        <label className="block font-semibold mb-1.5">Title</label>
+        <input
+          required
+          value={form.title}
+          onChange={e => setForm(prev => ({ ...prev, title: e.target.value }))}
+          className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
+        />
+      </div>
+      <div>
+        <label className="block font-semibold mb-1.5">Content</label>
+        <textarea
+          required
+          rows={4}
+          value={form.content}
+          onChange={e => setForm(prev => ({ ...prev, content: e.target.value }))}
+          className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
+        />
+      </div>
+      <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer"><input type="checkbox" checked={form.isPinned} onChange={e=>setForm(prev=>({...prev,isPinned:e.target.checked}))} className="rounded"/> 📌 Pin this announcement</label>
       <div className="grid grid-cols-2 gap-3">
-        <div><label className="block font-semibold mb-1.5">Schedule Publish (optional)</label><input type="datetime-local" value={form.publishAt||''} onChange={e=>setForm({...form,publishAt:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/><p className="text-[11px] text-slate-400 mt-0.5">Leave blank to publish immediately</p></div>
-        <div><label className="block font-semibold mb-1.5">Expires At (optional)</label><input type="datetime-local" value={form.expiresAt||''} onChange={e=>setForm({...form,expiresAt:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/><p className="text-[11px] text-slate-400 mt-0.5">Auto-hides after this date</p></div>
+        <div><label className="block font-semibold mb-1.5">Schedule Publish (optional)</label><input type="datetime-local" value={form.publishAt||''} onChange={e=>setForm(prev=>({...prev,publishAt:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/><p className="text-[11px] text-slate-400 mt-0.5">Leave blank to publish immediately</p></div>
+        <div><label className="block font-semibold mb-1.5">Expires At (optional)</label><input type="datetime-local" value={form.expiresAt||''} onChange={e=>setForm(prev=>({...prev,expiresAt:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/><p className="text-[11px] text-slate-400 mt-0.5">Auto-hides after this date</p></div>
       </div>
       <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editItem?'Update Announcement':'Publish Bulletin'}</button>
     </form>
@@ -379,8 +396,8 @@ export function SharedAnnouncementsPage() {
           );
         })}</div>
       )}
-      <ModalDialog isOpen={createOpen} onClose={()=>setCreateOpen(false)} title="Publish Announcement"><AnnouncementForm/></ModalDialog>
-      <ModalDialog isOpen={Boolean(editItem)} onClose={()=>setEditItem(null)} title="Edit Announcement"><AnnouncementForm/></ModalDialog>
+      <ModalDialog isOpen={createOpen} onClose={()=>setCreateOpen(false)} title="Publish Announcement">{announcementFormContent}</ModalDialog>
+      <ModalDialog isOpen={Boolean(editItem)} onClose={()=>setEditItem(null)} title="Edit Announcement">{announcementFormContent}</ModalDialog>
       <div className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 ${delItem?'':'hidden'}`}>
         <div className="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-sm p-6">
           <h2 className="text-base font-bold text-slate-900 mb-2">Delete Announcement</h2>
@@ -527,8 +544,8 @@ export function SharedDiscussionsPage() {
             <select value={threadForm.category} onChange={e=>setThreadForm({...threadForm,category:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
               <option value="laboratory_help">🔬 Laboratory Help</option><option value="technical_question">💻 Technical Question</option><option value="assignment_help">📝 Assignment Help</option><option value="general_discussion">💬 General</option>
             </select></div>
-          <div><label className="block font-semibold mb-1.5">Title</label><input required value={threadForm.title} onChange={e=>setThreadForm({...threadForm,title:e.target.value})} placeholder="e.g., OSPF neighbor not forming" className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/></div>
-          <div><label className="block font-semibold mb-1.5">Details</label><textarea required rows={4} value={threadForm.body} onChange={e=>setThreadForm({...threadForm,body:e.target.value})} placeholder="Describe the issue in detail…" className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+          <div><label className="block font-semibold mb-1.5">Title</label><input required value={threadForm.title} onChange={e=>setThreadForm(p=>({...p,title:e.target.value}))} placeholder="e.g., OSPF neighbor not forming" className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/></div>
+          <div><label className="block font-semibold mb-1.5">Details</label><textarea required rows={4} value={threadForm.body} onChange={e=>setThreadForm(p=>({...p,body:e.target.value}))} placeholder="Describe the issue in detail…" className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/></div>
           <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">Post Thread</button>
         </form>
       </ModalDialog>
