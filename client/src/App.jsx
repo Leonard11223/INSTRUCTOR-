@@ -375,6 +375,7 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        <Route
           path="/ta/discussions"
           element={
             <ProtectedRoute allowedRoles={['teaching_assistant']}>
