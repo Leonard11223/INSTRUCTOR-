@@ -257,6 +257,7 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       const taReviewRes = await taAgent.put('/api/submissions/2/review').send({
         preliminaryFeedback: 'Checked code structure; ready for final instructor scoring.',
         flaggedForInstructorReview: true,
+        flagCategory: 'instructor_review_needed',
         flagReason: 'Verified TLS question'
       });
       expect(taReviewRes.status).toBe(200);

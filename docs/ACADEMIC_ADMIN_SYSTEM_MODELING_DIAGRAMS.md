@@ -404,7 +404,7 @@ flowchart TB
 
     CourseObj["<u>courseNET201 : Course</u>\nid = 1\ncode = 'NET-201'\ntitle = 'Enterprise Routing & OSPF'\ncredits = 4"]
 
-    SecObj["<u>sectionBSIT3A : ClassSection</u>\nid = 1\nsectionCode = 'BSIT-3A-NET201'\ninstructorId = 3 (Prof. Vance)\ntaId = 5 (Liam Reyes)\nmaxCapacity = 40\ngradesApproved = true"]
+    SecObj["<u>sectionBSIT3A : ClassSection</u>\nid = 1\nsectionCode = 'BSIT-3A-NET201'\ninstructorId = 3 (Prof. Vance)\ntaId = 5 (Arra Siena)\nmaxCapacity = 40\ngradesApproved = true"]
 
     DeptObj -- "owns" --> ProgObj
     ProgObj -- "curates" --> CourseObj

@@ -39,7 +39,7 @@ For each academic year, assign every student a program, year level, and cohort s
 | **Academic Administrator** | `acadadmin@academy.edu` | `Acad@12345` | Clarissa Thorne — Institutional Registrar |
 | **Instructor (Primary)** | `instructor@academy.edu` | `Inst@12345` | Prof. Elena Vance — Assigned to `NET-201`, `SEC-202`, ` PRG-101` |
 | **Instructor (Secondary)** | `instructor2@academy.edu` | `Inst@12345` | Prof. Marcus Sterling — Assigned to `SEC-305` |
-| **Teaching Assistant** | `ta@academy.edu` | `Ta@12345` | Liam Reyes — Assigned to `BSIT-3A-NET201` |
+| **Teaching Assistant** | `ta@academy.edu` | `Ta@12345` | Arra Siena — Assigned to `BSIT-3A-NET201` |
 | **Student (Primary)** | `student@academy.edu` | `Stud@12345` | Maya Lin (`2026-00101`) — Enrolled in `NET-201` & `SEC-202` |
 | **Student (Secondary)** | `student2@academy.edu` | `Stud@12345` | Carlos Rivera (`2026-00102`) — Enrolled in `NET-201` |
 

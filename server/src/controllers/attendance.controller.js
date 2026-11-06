@@ -40,12 +40,26 @@ async function createSession(req, res, next) {
   try {
     const { classId, sessionDate, topic } = req.body;
     if (!classId || !sessionDate) throw new AppError('classId and sessionDate are required.', 400);
-    await verifyClassAccess(req.user, classId, { allowAdmin: true, allowInstructor: true });
+
+    // TAs may create attendance sessions when canManageDiscussions is enabled on their
+    // assignment — this flag represents general in-class management authority.
+    // Without this fix the route allowed TAs but the controller always rejected them.
+    await verifyClassAccess(req.user, classId, {
+      allowAdmin: true,
+      allowInstructor: true,
+      allowTA: true,
+      requiredTaFlag: 'canManageDiscussions'
+    });
+
+    // Validate sessionDate is a plausible date and sanitize topic
+    if (!sessionDate || Number.isNaN(Date.parse(sessionDate))) {
+      throw new AppError('sessionDate must be a valid date.', 400, 'INVALID_SESSION_DATE');
+    }
 
     const session = await AttendanceSession.create({
       classId: Number(classId),
       sessionDate,
-      topic: topic || null,
+      topic: topic ? String(topic).slice(0, 255) : null,
       createdBy: req.user.id
     });
 

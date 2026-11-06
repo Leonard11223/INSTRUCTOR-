@@ -26,7 +26,7 @@ const DEMO_ACCOUNTS = [
   { role: 'Super Admin', email: 'superadmin@academy.edu', pass: 'Admin@12345', badge: 'System & IAM' },
   { role: 'Academic Admin', email: 'acadadmin@academy.edu', pass: 'Acad@12345', badge: 'Registrar & Terms' },
   { role: 'Instructor', email: 'instructor@academy.edu', pass: 'Inst@12345', badge: 'Prof. Elena Vance' },
-  { role: 'Teaching Assistant', email: 'ta@academy.edu', pass: 'Ta@12345', badge: 'Liam Reyes (BSIT 4-A)' },
+  { role: 'Teaching Assistant', email: 'ta@academy.edu', pass: 'Ta@12345', badge: 'Arra Siena (BSIT 4-A)' },
   { role: 'Student', email: 'student@academy.edu', pass: 'Stud@12345', badge: 'Maya Lin (BSIT 4-A)' }
 ];
 
@@ -462,16 +462,107 @@ export function ProfileSettingsPage() {
   const { user, refreshAuth } = useAuth();
   const { addToast } = useToast();
 
-  // ── Profile form state ────────────────────────────────────────────────────
+  // ── Avatar state ──────────────────────────────────────────────────────────
+  const [avatarSrc, setAvatarSrc]       = useState(user?.avatarUrl || null);
+  const [pendingAvatar, setPendingAvatar] = useState(false); // true = new photo selected, not yet saved
+  const [avatarMode, setAvatarMode]     = useState(null); // null | 'camera'
+  const [cameraStream, setCameraStream] = useState(null);
+  const [savingAvatar, setSavingAvatar] = useState(false);
+  const videoRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
+
+  // Sync with server state after save/refresh (resets pending flag)
+  React.useEffect(() => {
+    setAvatarSrc(user?.avatarUrl || null);
+    setPendingAvatar(false);
+  }, [user?.avatarUrl]);
+
+  const handleAvatarFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { addToast('Please select an image file.', 'error'); return; }
+    if (file.size > 2 * 1024 * 1024) { addToast('Image must be smaller than 2 MB.', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => { setAvatarSrc(ev.target.result); setPendingAvatar(true); };
+    reader.readAsDataURL(file);
+    setAvatarMode(null);
+  };
+
+  const startCamera = async () => {
+    setAvatarMode('camera');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      setCameraStream(stream);
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    } catch {
+      addToast('Camera access denied or unavailable.', 'error');
+      setAvatarMode(null);
+    }
+  };
+
+  const stopCamera = () => {
+    cameraStream?.getTracks().forEach((t) => t.stop());
+    setCameraStream(null);
+    setAvatarMode(null);
+  };
+
+  const capturePhoto = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    setAvatarSrc(canvas.toDataURL('image/jpeg', 0.85));
+    setPendingAvatar(true);
+    stopCamera();
+  };
+
+  const handleSaveAvatar = async () => {
+    if (!avatarSrc) return;
+    setSavingAvatar(true);
+    try {
+      await lmsApi.updateProfile({ avatarUrl: avatarSrc });
+      await refreshAuth();
+      addToast('Profile picture updated.');
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    } finally {
+      setSavingAvatar(false);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setSavingAvatar(true);
+    try {
+      await lmsApi.updateProfile({ avatarUrl: null });
+      setAvatarSrc(null);
+      await refreshAuth();
+      addToast('Profile picture removed.');
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    } finally {
+      setSavingAvatar(false);
+    }
+  };
   const [firstName, setFirstName] = useState(user?.firstName || '');
   const [lastName,  setLastName]  = useState(user?.lastName  || '');
   const [bio,       setBio]       = useState(user?.bio       || '');
   const [phone,     setPhone]     = useState(user?.phone     || '');
   const [timezone,  setTimezone]  = useState(user?.timezone  || 'Asia/Manila');
-  const [prefs, setPrefs] = useState(user?.notificationPreferences || {
-    inApp: true, email: false, assignments: true,
-    assessments: true, grades: true, announcements: true, messages: true
+  const [prefs, setPrefs] = useState(() => {
+    const raw = user?.notificationPreferences;
+    if (!raw) return { inApp: true, email: false, assignments: true, assessments: true, grades: true, announcements: true, messages: true };
+    if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return {}; } }
+    return raw;
   });
+
+  // Re-sync prefs whenever user object updates (e.g. after refreshAuth)
+  React.useEffect(() => {
+    const raw = user?.notificationPreferences;
+    if (!raw) return;
+    setPrefs(typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return {}; } })() : raw);
+  }, [user?.notificationPreferences]);
   const [savingProfile, setSavingProfile] = useState(false);
 
   // ── Password form state ───────────────────────────────────────────────────
@@ -556,6 +647,110 @@ export function ProfileSettingsPage() {
             <p className="font-semibold text-slate-500 uppercase tracking-wider mb-1">Account Status</p>
             <StatusBadge status={user?.status || 'active'} />
           </div>
+        </div>
+      </div>
+
+      {/* ── Profile picture ────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <h2 className="text-base font-bold text-slate-900 mb-4">Profile Picture</h2>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
+          {/* Avatar preview */}
+          <div className="relative shrink-0">
+            {avatarSrc ? (
+              <img
+                src={avatarSrc}
+                alt="Profile picture"
+                className="w-24 h-24 rounded-full object-cover border-2 border-blue-200 shadow"
+              />
+            ) : (
+              <div className="w-24 h-24 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-3xl font-bold border-2 border-indigo-200 select-none">
+                {(user?.firstName?.[0] ?? '?')}{(user?.lastName?.[0] ?? '')}
+              </div>
+            )}
+            {avatarSrc && (
+              <span className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-emerald-500 border-2 border-white" title="Custom photo set" />
+            )}
+          </div>
+
+          {/* Camera view (hidden when not in camera mode) */}
+          <div className={avatarMode === 'camera' ? 'block' : 'hidden'}>
+            <video ref={videoRef} autoPlay playsInline muted className="w-56 h-40 rounded-xl border border-slate-200 object-cover" />
+            <canvas ref={canvasRef} className="hidden" />
+            <div className="flex gap-2 mt-2">
+              <button type="button" onClick={capturePhoto}
+                className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">
+                Capture
+              </button>
+              <button type="button" onClick={stopCamera}
+                className="px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-50 text-xs font-semibold rounded-lg">
+                Cancel
+              </button>
+            </div>
+          </div>
+
+          {/* Controls */}
+          {avatarMode !== 'camera' && (
+            <div className="space-y-3 text-xs">
+              <p className="text-slate-500">
+                Upload a photo or take one with your camera. It will be visible to instructors and students in your sections.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {/* Photo is saved and no pending change — show Change Photo + Take Photo + Remove */}
+                {avatarSrc && !pendingAvatar ? (
+                  <>
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                      Change Photo
+                      <input type="file" accept="image/*" className="hidden" onChange={handleAvatarFileChange} aria-label="Change profile photo" />
+                    </label>
+
+                    <button type="button" onClick={startCamera}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-lg transition-colors">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                      Take Photo
+                    </button>
+
+                    <button type="button" onClick={handleRemoveAvatar} disabled={savingAvatar}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg transition-colors">
+                      Remove
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {/* No photo yet, or a new photo is selected but not yet saved */}
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                      Upload Photo
+                      <input type="file" accept="image/*" className="hidden" onChange={handleAvatarFileChange} aria-label="Upload profile photo" />
+                    </label>
+
+                    <button type="button" onClick={startCamera}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-lg transition-colors">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                      Take Photo
+                    </button>
+
+                    {/* New photo pending save */}
+                    {avatarSrc && pendingAvatar && (
+                      <button type="button" onClick={handleSaveAvatar} disabled={savingAvatar}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors">
+                        {savingAvatar ? 'Saving…' : 'Save Photo'}
+                      </button>
+                    )}
+
+                    {/* Remove even if unsaved — lets user revert to previous saved state */}
+                    {(avatarSrc || user?.avatarUrl) && (
+                      <button type="button" onClick={handleRemoveAvatar} disabled={savingAvatar}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg transition-colors">
+                        Remove
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400">JPG or PNG · Max 2 MB</p>
+            </div>
+          )}
         </div>
       </div>
 
