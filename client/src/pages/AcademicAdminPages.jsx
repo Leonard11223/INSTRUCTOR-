@@ -8,7 +8,15 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  CartesianGrid
+  CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+  Legend,
+  Area,
+  AreaChart
 } from 'recharts';
 import {
   Building2,
@@ -19,9 +27,22 @@ import {
   Plus,
   Upload,
   CheckCircle2,
-  RotateCcw
+  RotateCcw,
+  Search,
+  Lock,
+  Key,
+  Edit2,
+  ChevronLeft,
+  ChevronRight,
+  TrendingUp,
+  BarChart3,
+  PieChart as PieIcon,
+  GraduationCap,
+  UserCheck,
+  AlertTriangle
 } from 'lucide-react';
 import { lmsApi, extractErrorMessage } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import {
   PageHeader,
   StatCard,
@@ -32,84 +53,228 @@ import {
   useToast
 } from '../components/ui/SharedComponents';
 
+// ── Shared: Classes This Semester table with pagination ──────────────────────
+function ClassesThisTermTable({ classes = [], activeSemester, rowsPerPageDefault = 5 }) {
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(rowsPerPageDefault);
+
+  const total      = classes.length;
+  const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
+  const currentPg  = Math.min(page, totalPages);
+  const paged      = classes.slice((currentPg - 1) * rowsPerPage, currentPg * rowsPerPage);
+  const startIdx   = total === 0 ? 0 : (currentPg - 1) * rowsPerPage + 1;
+  const endIdx     = Math.min(currentPg * rowsPerPage, total);
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-base font-bold text-slate-900">Classes This Semester</h2>
+          {activeSemester && <p className="text-xs text-slate-400 mt-0.5">{activeSemester}</p>}
+        </div>
+        <span className="text-xs text-slate-400">{total} section{total !== 1 ? 's' : ''}</span>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
+            <tr>
+              <th className="px-4 py-3">Section</th>
+              <th className="px-4 py-3">Course</th>
+              <th className="px-4 py-3">Instructor</th>
+              <th className="px-4 py-3">Students Enrolled</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {paged.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
+                  No classes configured for the current semester.
+                </td>
+              </tr>
+            )}
+            {paged.map((cls) => {
+              const fillPct = cls.capacity > 0 ? Math.round((cls.enrolledCount / cls.capacity) * 100) : 0;
+              const isFull  = cls.enrolledCount >= cls.capacity;
+              return (
+                <tr key={cls.id} className="hover:bg-slate-50">
+                  {/* Section code */}
+                  <td className="px-4 py-3 font-mono font-bold text-blue-700 whitespace-nowrap">
+                    {cls.sectionCode}
+                  </td>
+
+                  {/* Course */}
+                  <td className="px-4 py-3">
+                    <p className="font-semibold text-slate-900">{cls.courseCode || '—'}</p>
+                    {cls.courseTitle && (
+                      <p className="text-[11px] text-slate-400 truncate max-w-[180px]">{cls.courseTitle}</p>
+                    )}
+                  </td>
+
+                  {/* Instructor */}
+                  <td className="px-4 py-3">
+                    {cls.hasInstructor
+                      ? <span className="text-slate-700">{cls.instructorName}</span>
+                      : <span className="text-red-500 font-semibold">Unassigned</span>}
+                  </td>
+
+                  {/* Students enrolled — count + inline progress bar */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2 min-w-[120px]">
+                      <span className={`font-bold whitespace-nowrap ${isFull ? 'text-red-600' : 'text-slate-800'}`}>
+                        {cls.enrolledCount}
+                        <span className="font-normal text-slate-400"> / {cls.capacity}</span>
+                      </span>
+                    </div>
+                    {/* Capacity bar */}
+                    <div className="w-full bg-slate-100 rounded-full h-1 mt-1 overflow-hidden">
+                      <div
+                        className={`h-1 rounded-full ${
+                          fillPct >= 90 ? 'bg-red-500' : fillPct >= 70 ? 'bg-amber-400' : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${Math.min(100, fillPct)}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{fillPct}% full</p>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+        <div className="flex items-center gap-2">
+          <span>Rows per page:</span>
+          <select
+            value={rowsPerPage}
+            onChange={(e) => { setRowsPerPage(Number(e.target.value)); setPage(1); }}
+            className="px-2 py-1 rounded border border-slate-300 bg-white font-semibold"
+          >
+            <option value={5}>5</option>
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+          </select>
+          <span className="text-slate-400">|</span>
+          <span>
+            {total === 0 ? '0' : `${startIdx}–${endIdx}`} of <strong>{total}</strong>
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            disabled={currentPg <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded border border-slate-300 bg-white font-semibold disabled:opacity-40 hover:bg-slate-100"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" /> Prev
+          </button>
+          <span className="px-2 font-semibold">{currentPg} / {totalPages}</span>
+          <button
+            disabled={currentPg >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded border border-slate-300 bg-white font-semibold disabled:opacity-40 hover:bg-slate-100"
+          >
+            Next <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AcademicDashboardPage() {
+  const { user } = useAuth();
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard', 'academic_admin'],
     queryFn: lmsApi.getDashboardSummary
   });
 
-  if (isLoading) return <LoadingState label="Loading academic operations dashboard..." />;
+  const { data: usersData } = useQuery({
+    queryKey: ['users', '', '', '', 1, 5],
+    queryFn: () => lmsApi.listUsers({ limit: 5, page: 1 })
+  });
+
+  if (isLoading) return <LoadingState label="Loading dashboard…" />;
   if (error) return <ErrorState message={extractErrorMessage(error)} onRetry={refetch} />;
 
   const d = data?.data || {};
   const m = d.metrics || {};
+  const recentUsers = usersData?.data?.users || [];
+  const totalUsers  = usersData?.data?.pagination?.total ?? 0;
 
   const activeSemesterLabel = m.activeSemester
     ? `${m.activeSemester}${m.activeAcademicYear ? ` · ${m.activeAcademicYear}` : ''}`
     : 'No active semester configured';
 
+  const classes       = d.classesAtAGlance || [];
+  const totalCap      = classes.reduce((a, c) => a + (c.capacity || 0), 0);
+  const totalEnrolled = classes.reduce((a, c) => a + (c.enrolledCount || 0), 0);
+  const fillRate      = totalCap > 0 ? Math.round((totalEnrolled / totalCap) * 100) : 0;
+  const unassigned    = classes.filter((c) => !c.hasInstructor).length;
+
   return (
     <div className="space-y-6">
       <PageHeader
         badge="Academic Administration"
-        title="Institutional Curriculum, Enrollment & Grade Governance"
+        title={`Welcome back, ${user?.firstName || 'Administrator'}`}
         subtitle={`Active Term: ${activeSemesterLabel}`}
       />
 
-      {/* ── Stat cards ───────────────────────────────────────────────────── */}
+      {/* ── Stat cards — admin-focused ───────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Departments & Programs"
-          value={`${m.totalDepartments ?? 0} / ${m.totalPrograms ?? 0}`}
-          subtitle="Active academic units"
+          title="Departments"
+          value={m.totalDepartments ?? 0}
+          subtitle={`${m.totalPrograms ?? 0} degree programs`}
           icon={Building2}
           accent="blue"
         />
         <StatCard
-          title="Catalog Courses"
-          value={m.totalCourses ?? 0}
-          subtitle={`${m.totalClasses ?? 0} class sections this term`}
-          icon={BookOpen}
+          title="Total Users"
+          value={totalUsers}
+          subtitle="Institutional accounts"
+          icon={Users}
           accent="indigo"
         />
         <StatCard
-          title="Current Enrollments"
-          value={m.totalEnrollments ?? 0}
-          subtitle={m.activeSemester ? `In ${m.activeSemester}` : 'All semesters'}
-          icon={Users}
+          title="Courses Offered"
+          value={m.totalCourses ?? 0}
+          subtitle={`${m.totalClasses ?? 0} class sections this term`}
+          icon={BookOpen}
           accent="emerald"
         />
         <StatCard
-          title="Pending Grade Approvals"
-          value={m.pendingGradeApprovalsCount ?? 0}
-          subtitle={m.unassignedClassesCount > 0 ? `${m.unassignedClassesCount} class(es) unassigned` : 'All classes have instructors'}
-          icon={ClipboardCheck}
+          title="Enrollments"
+          value={m.totalEnrollments ?? 0}
+          subtitle={`${fillRate}% capacity · ${unassigned > 0 ? `${unassigned} unassigned` : 'All assigned'}`}
+          icon={GraduationCap}
           accent="amber"
         />
       </div>
 
-      {/* ── Bar chart + Grade approvals ───────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Enrollment by Program chart */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+      {/* ── Enrollment chart + Quick actions ─────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
           <h2 className="text-base font-bold text-slate-900 mb-1">Enrollment by Degree Program</h2>
-          <p className="text-xs text-slate-500 mb-4">
-            Active student distribution · {m.activeSemester || 'All time'}
-          </p>
-          <div className="h-64">
+          <p className="text-xs text-slate-500 mb-4">Student distribution · {m.activeSemester || 'current term'}</p>
+          <div className="h-56">
             {(d.enrollmentByProgram || []).length === 0 ? (
               <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-                No enrollment data available for the current term.
+                No enrollment data for the current term.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={d.enrollmentByProgram}>
+                <BarChart data={d.enrollmentByProgram} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="programCode" tick={{ fontSize: 11 }} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                   <Tooltip
                     formatter={(val, _, props) => [val, props.payload.programName]}
-                    labelFormatter={(label) => `Program: ${label}`}
+                    labelFormatter={(l) => `Program: ${l}`}
                   />
                   <Bar dataKey="enrollments" fill="#2563eb" radius={[6, 6, 0, 0]} />
                 </BarChart>
@@ -118,178 +283,114 @@ export function AcademicDashboardPage() {
           </div>
         </div>
 
-        {/* Pending grade approvals */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs flex flex-col">
-          <h2 className="text-base font-bold text-slate-900 mb-1">Final Grades Pending Approval</h2>
-          <p className="text-xs text-slate-500 mb-4">
-            Submitted by instructors — awaiting registrar sign-off
-          </p>
-          <div className="space-y-3 flex-1 overflow-y-auto max-h-52">
-            {(d.pendingGradeApprovals || []).length === 0 ? (
-              <p className="text-xs text-slate-500 py-8 text-center">
-                All submitted class grades have been reviewed. ✓
-              </p>
-            ) : (
-              (d.pendingGradeApprovals || []).map((cls) => (
-                <div key={cls.id}
-                  className="flex items-center justify-between p-3.5 rounded-lg bg-amber-50/60 border border-amber-200 text-xs">
-                  <div>
-                    <p className="font-bold text-slate-900">{cls.name}</p>
-                    <p className="text-slate-600">
-                      {cls.courseOffering?.course?.code}
-                      {cls.courseOffering?.semester ? ` · ${cls.courseOffering.semester.name}` : ''}
-                      {' · Submitted '}
-                      {cls.finalGradesSubmittedAt
-                        ? new Date(cls.finalGradesSubmittedAt).toLocaleDateString()
-                        : 'Recently'}
-                    </p>
-                  </div>
-                  <Link to="/academic/grade-approvals"
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg whitespace-nowrap">
-                    Review
-                  </Link>
-                </div>
-              ))
-            )}
-          </div>
+        {/* Quick actions */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+          <h2 className="text-base font-bold text-slate-900">Quick Actions</h2>
+          {[
+            { label: 'Manage Users',           desc: 'Create, edit, reset accounts',   to: '/academic/users',         color: 'bg-blue-600 hover:bg-blue-700' },
+            { label: 'Departments & Programs', desc: 'Academic structure',              to: '/academic/structure',     color: 'bg-indigo-600 hover:bg-indigo-700' },
+            { label: 'Years & Semesters',      desc: 'Configure academic terms',        to: '/academic/terms',         color: 'bg-violet-600 hover:bg-violet-700' },
+            { label: 'Announcements',          desc: 'Post institutional notices',      to: '/academic/announcements', color: 'bg-emerald-600 hover:bg-emerald-700' },
+            { label: 'Analytics',              desc: 'View institutional insights',     to: '/academic/analytics',     color: 'bg-amber-600 hover:bg-amber-700' }
+          ].map((a) => (
+            <Link key={a.to} to={a.to}
+              className={`flex items-center justify-between w-full px-4 py-3 ${a.color} text-white rounded-lg transition-colors`}>
+              <div>
+                <p className="text-xs font-bold">{a.label}</p>
+                <p className="text-[11px] opacity-80">{a.desc}</p>
+              </div>
+              <ChevronRight className="w-4 h-4 opacity-70 shrink-0" />
+            </Link>
+          ))}
         </div>
       </div>
 
-      {/* ── Department summary table ──────────────────────────────────────── */}
+      {/* ── Department overview ───────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-200">
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
           <h2 className="text-base font-bold text-slate-900">Department Overview</h2>
+          <Link to="/academic/structure" className="text-xs text-blue-600 hover:underline font-semibold">Manage →</Link>
         </div>
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
             <tr>
               <th className="px-4 py-3">Code</th>
-              <th className="px-4 py-3">Department Name</th>
+              <th className="px-4 py-3">Department</th>
               <th className="px-4 py-3">Head</th>
-              <th className="px-4 py-3">Programs</th>
-              <th className="px-4 py-3">Courses</th>
+              <th className="px-4 py-3 text-center">Programs</th>
+              <th className="px-4 py-3 text-center">Courses</th>
               <th className="px-4 py-3">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
             {(d.departmentSummary || []).length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">No departments configured yet.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">No departments configured.</td></tr>
             )}
             {(d.departmentSummary || []).map((dept) => (
               <tr key={dept.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-mono font-bold text-blue-700">{dept.code}</td>
                 <td className="px-4 py-3 font-semibold text-slate-900">{dept.name}</td>
-                <td className="px-4 py-3 text-slate-600">{dept.headName || <span className="text-slate-400 italic">TBA</span>}</td>
-                <td className="px-4 py-3 font-semibold">{dept.programCount ?? 0}</td>
-                <td className="px-4 py-3 font-semibold">{dept.courseCount ?? 0}</td>
+                <td className="px-4 py-3 text-slate-500">{dept.headName || <span className="italic text-slate-300">TBA</span>}</td>
+                <td className="px-4 py-3 text-center font-semibold">{dept.programCount ?? 0}</td>
+                <td className="px-4 py-3 text-center font-semibold">{dept.courseCount ?? 0}</td>
                 <td className="px-4 py-3"><StatusBadge status={dept.status || 'active'} /></td>
               </tr>
             ))}
           </tbody>
         </table>
-
-        {/* ── Table pagination footer ────────────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row items-center justify-between px-5 py-3 border-t border-slate-200 text-xs text-slate-500 gap-3 bg-slate-50/50">
-          <div className="flex items-center gap-2">
-            <span>Rows per page:</span>
-            <select
-              value={progRowsPerPage}
-              onChange={(e) => {
-                setProgRowsPerPage(Number(e.target.value));
-                setProgPage(1);
-              }}
-              className="px-2 py-1 rounded border border-slate-300 bg-white text-xs font-semibold focus:outline-hidden focus:ring-1 focus:ring-blue-500"
-            >
-              <option value={5}>5</option>
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-            </select>
-          </div>
-          <div>
-            Showing {startIdx}–{endIdx} of {totalPrograms} programs
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={currentPage <= 1}
-              onClick={() => setProgPage((p) => Math.max(1, p - 1))}
-              className="px-2.5 py-1 border border-slate-300 rounded text-slate-700 font-semibold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              &lt; Prev
-            </button>
-            <span className="font-semibold text-slate-700">Page {currentPage} of {totalPages}</span>
-            <button
-              type="button"
-              disabled={currentPage >= totalPages}
-              onClick={() => setProgPage((p) => Math.min(totalPages, p + 1))}
-              className="px-2.5 py-1 border border-slate-300 rounded text-slate-700 font-semibold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Next &gt;
-            </button>
-          </div>
-        </div>
       </div>
 
-      {/* ── Classes at a glance + Recent announcements ────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Classes at a glance (current semester) */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-200">
-            <h2 className="text-base font-bold text-slate-900">Classes This Semester</h2>
-            {m.activeSemester && (
-              <p className="text-xs text-slate-400 mt-0.5">{m.activeSemester}</p>
-            )}
+      {/* ── Classes This Semester — card grid matching instructor style ────── */}
+      {/* ── Classes This Semester — table with pagination ───────────────────── */}
+      <ClassesThisTermTable
+        classes={d.classesAtAGlance || []}
+        activeSemester={m.activeSemester}
+        rowsPerPageDefault={5}
+      />
+
+      {/* ── Recent users + Announcements ─────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Recent user accounts */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+            <h2 className="text-base font-bold text-slate-900">Recent User Accounts</h2>
+            <Link to="/academic/users" className="text-xs text-blue-600 hover:underline font-semibold">View All →</Link>
           </div>
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
               <tr>
-                <th className="px-4 py-3">Section</th>
-                <th className="px-4 py-3">Course</th>
-                <th className="px-4 py-3">Instructor</th>
-                <th className="px-4 py-3">Enrolled / Cap</th>
-                <th className="px-4 py-3">Grades</th>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {(d.classesAtAGlance || []).length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400">
-                  No classes configured for the current semester.
-                </td></tr>
+              {recentUsers.length === 0 && (
+                <tr><td colSpan={3} className="px-4 py-6 text-center text-slate-400">No users found.</td></tr>
               )}
-              {(d.classesAtAGlance || []).map((cls) => (
-                <tr key={cls.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono font-bold text-blue-700">{cls.sectionCode}</td>
+              {recentUsers.map((u) => (
+                <tr key={u.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3">
-                    <span className="font-semibold text-slate-900">{cls.courseCode}</span>
-                    {cls.courseTitle && <span className="block text-slate-400 truncate max-w-[140px]">{cls.courseTitle}</span>}
+                    <p className="font-semibold text-slate-900">{u.firstName} {u.lastName}</p>
+                    <p className="text-slate-400 text-[10px]">{u.email}</p>
                   </td>
-                  <td className="px-4 py-3">
-                    {cls.hasInstructor
-                      ? <span className="text-slate-700">{cls.instructorName}</span>
-                      : <span className="text-red-500 font-semibold">Unassigned</span>}
+                  <td className="px-4 py-3 capitalize text-slate-600">
+                    {(u.roles?.[0]?.slug || 'student').replace('_', ' ')}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={cls.enrolledCount >= cls.capacity ? 'text-red-600 font-semibold' : 'text-slate-700'}>
-                      {cls.enrolledCount}
-                    </span>
-                    <span className="text-slate-400"> / {cls.capacity}</span>
-                  </td>
-                  <td className="px-4 py-3"><StatusBadge status={cls.finalGradesStatus || 'in_progress'} /></td>
+                  <td className="px-4 py-3"><StatusBadge status={u.status} /></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        {/* Recent announcements feed */}
+        {/* Recent announcements */}
         <div className="bg-white rounded-xl border border-slate-200 flex flex-col overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900">Recent Announcements</h2>
-            <Link to="/academic/announcements" className="text-xs text-blue-600 hover:underline font-semibold">
-              View All
-            </Link>
+            <Link to="/academic/announcements" className="text-xs text-blue-600 hover:underline font-semibold">View All →</Link>
           </div>
-          <div className="divide-y divide-slate-100 flex-1 overflow-y-auto">
+          <div className="divide-y divide-slate-100 flex-1 overflow-y-auto max-h-72">
             {(d.recentAnnouncements || []).length === 0 ? (
               <p className="px-5 py-8 text-center text-xs text-slate-400">No recent announcements.</p>
             ) : (
@@ -301,8 +402,7 @@ export function AcademicDashboardPage() {
                   </div>
                   <p className="text-[11px] text-slate-500 line-clamp-2">{a.content}</p>
                   <p className="text-[10px] text-slate-400">
-                    {a.author ? `${a.author.firstName} ${a.author.lastName}` : 'System'} ·{' '}
-                    {new Date(a.createdAt).toLocaleDateString()}
+                    {a.author ? `${a.author.firstName} ${a.author.lastName}` : 'System'} · {new Date(a.createdAt).toLocaleDateString()}
                   </p>
                 </div>
               ))
@@ -749,6 +849,759 @@ export function DepartmentsAndProgramsPage() {
           </div>
         </ModalDialog>
       )}
+    </div>
+  );
+}
+
+export function AcademicUserManagementPage() {
+  const queryClient = useQueryClient();
+  const { user: currentUser } = useAuth();
+  const { addToast } = useToast();
+
+  // ── Filters ──────────────────────────────────────────────────────────────
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+
+  // ── Modals ────────────────────────────────────────────────────────────────
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [resetUser, setResetUser] = useState(null);         // user being password-reset
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetResult, setResetResult] = useState(null);     // { email, temporaryPassword }
+
+  // ── Edit form ──────────────────────────────────────────────────────────────
+  const [editForm, setEditForm] = useState({
+    firstName: '', lastName: '', email: '', status: 'active', roleSlug: 'student'
+  });
+
+  // ── Create form ────────────────────────────────────────────────────────────
+  const [createForm, setCreateForm] = useState({
+    firstName: '', lastName: '', email: '', password: 'Password@123', roleSlug: 'student'
+  });
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['users', search, roleFilter, statusFilter, page, limit],
+    queryFn: () => lmsApi.listUsers({ search, role: roleFilter, status: statusFilter, page, limit })
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }) => lmsApi.updateUser(id, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      addToast('User account updated.');
+    },
+    onError: (err) => addToast(extractErrorMessage(err), 'error')
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => lmsApi.deleteUser(id),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      addToast(res?.message || 'User removed.');
+    },
+    onError: (err) => addToast(extractErrorMessage(err), 'error')
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: ({ id, newPassword }) => lmsApi.resetUserPassword(id, { newPassword }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setResetResult({ email: resetUser?.email, temporaryPassword: res.data?.temporaryPassword || newPassword || 'Password@123' });
+      addToast(`Password reset for ${resetUser?.email}.`);
+    },
+    onError: (err) => addToast(extractErrorMessage(err), 'error')
+  });
+
+  const users = data?.data?.users || [];
+  const pagination = data?.data?.pagination || { total: 0, page, limit, totalPages: 1 };
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+  const handleSearchChange = (val) => { setSearch(val); setPage(1); };
+  const handleRoleFilterChange = (val) => { setRoleFilter(val); setPage(1); };
+  const handleStatusFilterChange = (val) => { setStatusFilter(val); setPage(1); };
+  const handleLimitChange = (val) => { setLimit(Number(val)); setPage(1); };
+
+  const openEdit = (u) => {
+    setEditingUser(u);
+    setEditForm({
+      firstName: u.firstName || '', lastName: u.lastName || '',
+      email: u.email || '', status: u.status || 'active',
+      roleSlug: u.roles?.[0]?.slug || 'student'
+    });
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    try {
+      const isSuperAdmin = (editingUser.roles || []).some((r) => r.slug === 'super_admin');
+      const payload = { firstName: editForm.firstName, lastName: editForm.lastName, status: editForm.status };
+      if (!isSuperAdmin && editForm.roleSlug) payload.roleSlug = editForm.roleSlug;
+      await lmsApi.updateUser(editingUser.id, payload);
+      addToast(`Account for ${editForm.firstName} ${editForm.lastName} updated.`);
+      setEditOpen(false);
+      setEditingUser(null);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
+  };
+
+  const handleDelete = (u) => {
+    const isSuperAdmin = (u.roles || []).some((r) => r.slug === 'super_admin');
+    if (isSuperAdmin) { addToast('Super Admin accounts cannot be deleted.', 'error'); return; }
+    if (window.confirm(`Delete or deactivate "${u.email}"?`)) deleteMutation.mutate(u.id);
+  };
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    try {
+      await lmsApi.createUser(createForm);
+      addToast('User account created.');
+      setCreateForm({ firstName: '', lastName: '', email: '', password: 'Password@123', roleSlug: 'student' });
+      setCreateOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    } catch (err) { addToast(extractErrorMessage(err), 'error'); }
+  };
+
+  const openReset = (u) => {
+    setResetUser(u);
+    setResetPasswordValue('');
+    setResetResult(null);
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    if (!resetUser) return;
+    resetMutation.mutate({ id: resetUser.id, newPassword: resetPasswordValue || undefined });
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        badge="Registrar Operations"
+        title="User Account Management & Password Reset"
+        subtitle="Create, edit, activate, suspend, and reset passwords for institutional accounts."
+        actions={
+          <button type="button" onClick={() => setCreateOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">
+            <Plus className="w-4 h-4" /> Create User Account
+          </button>
+        }
+      />
+
+      {/* ── Filter bar ──────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          <input type="text" value={search} onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search by name or email..."
+            className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300" />
+        </div>
+        <select value={roleFilter} onChange={(e) => handleRoleFilterChange(e.target.value)}
+          className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white">
+          <option value="">All Roles</option>
+          <option value="super_admin">Super Administrator</option>
+          <option value="academic_admin">Academic Administrator</option>
+          <option value="instructor">Instructor</option>
+          <option value="teaching_assistant">Teaching Assistant</option>
+          <option value="student">Student</option>
+        </select>
+        <select value={statusFilter} onChange={(e) => handleStatusFilterChange(e.target.value)}
+          className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 bg-white">
+          <option value="">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="suspended">Suspended</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+
+      {/* ── User table ──────────────────────────────────────────────────── */}
+      {isLoading ? (
+        <LoadingState />
+      ) : (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-3">Name & Email</th>
+                  <th className="px-4 py-3">Role</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {users.length === 0 && (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">No users match the filter criteria.</td></tr>
+                )}
+                {users.map((u) => {
+                  const role = u.roles?.[0]?.slug || 'student';
+                  const isSuperAdmin = role === 'super_admin';
+                  const isSelf = u.id === currentUser?.id;
+
+                  return (
+                    <tr key={u.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-900 flex items-center gap-1.5">
+                          {u.firstName} {u.lastName}
+                          {isSelf && <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 font-bold">You</span>}
+                        </p>
+                        <p className="text-slate-500">{u.email}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        {isSuperAdmin ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs select-none">
+                            <Lock className="w-3.5 h-3.5" /> Super Admin (Locked)
+                          </span>
+                        ) : (
+                          <select value={role}
+                            onChange={(e) => updateMutation.mutate({ id: u.id, payload: { roleSlug: e.target.value } })}
+                            className="px-2 py-1 rounded border border-slate-300 text-xs bg-white font-medium">
+                            <option value="student">Student</option>
+                            <option value="instructor">Instructor</option>
+                            <option value="teaching_assistant">TA</option>
+                            <option value="academic_admin">Academic Admin</option>
+                          </select>
+                        )}
+                      </td>
+                      <td className="px-4 py-3"><StatusBadge status={u.status} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          {/* Activate / Suspend */}
+                          {u.status !== 'active' ? (
+                            <button onClick={() => updateMutation.mutate({ id: u.id, payload: { status: 'active' } })}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-semibold">Activate</button>
+                          ) : (
+                            <button disabled={isSuperAdmin}
+                              onClick={() => updateMutation.mutate({ id: u.id, payload: { status: 'suspended' } })}
+                              className={`px-2.5 py-1 rounded text-[11px] font-semibold ${isSuperAdmin ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-amber-100 hover:bg-amber-200 text-amber-900'}`}>Suspend</button>
+                          )}
+
+                          {/* Reset Password — the unique Academic Admin feature */}
+                          {!isSuperAdmin && (
+                            <button onClick={() => openReset(u)}
+                              title="Reset user password"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-[11px] font-semibold transition-colors">
+                              <Key className="w-3 h-3" /> Reset
+                            </button>
+                          )}
+
+                          {/* Edit */}
+                          <button onClick={() => openEdit(u)} title="Edit user"
+                            className="p-1 rounded text-slate-600 hover:text-blue-600 hover:bg-blue-50">
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Delete */}
+                          <button disabled={isSuperAdmin || isSelf} onClick={() => handleDelete(u)}
+                            title={isSuperAdmin ? 'Protected' : isSelf ? 'Cannot delete self' : 'Delete user'}
+                            className={`p-1 rounded ${isSuperAdmin || isSelf ? 'text-slate-300 cursor-not-allowed' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}>
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ── Pagination ──────────────────────────────────────────────── */}
+          <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <span>Rows per page:</span>
+              <select value={limit} onChange={(e) => handleLimitChange(e.target.value)}
+                className="px-2 py-1 rounded border border-slate-300 bg-white font-semibold">
+                <option value={10}>10</option><option value={25}>25</option>
+                <option value={50}>50</option><option value={100}>100</option>
+              </select>
+              <span className="text-slate-400">|</span>
+              <span>Showing {pagination.total === 0 ? 0 : (page - 1) * limit + 1}–{Math.min(page * limit, pagination.total)} of <strong>{pagination.total}</strong> users</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-slate-300 bg-white font-semibold disabled:opacity-40">
+                <ChevronLeft className="w-3.5 h-3.5" /> Previous
+              </button>
+              <span className="px-3 py-1 font-semibold">Page {pagination.page} of {pagination.totalPages}</span>
+              <button disabled={page >= pagination.totalPages} onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded border border-slate-300 bg-white font-semibold disabled:opacity-40">
+                Next <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Create User modal ────────────────────────────────────────────── */}
+      <ModalDialog isOpen={createOpen} onClose={() => setCreateOpen(false)} title="Provision New Account">
+        <form onSubmit={handleCreate} className="space-y-3.5 text-xs">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">First Name</label>
+              <input required value={createForm.firstName} onChange={(e) => setCreateForm({ ...createForm, firstName: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Last Name</label>
+              <input required value={createForm.lastName} onChange={(e) => setCreateForm({ ...createForm, lastName: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+            </div>
+          </div>
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">Institutional Email</label>
+            <input required type="email" value={createForm.email} onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Initial Password</label>
+              <input type="password" value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Primary Role</label>
+              <select value={createForm.roleSlug} onChange={(e) => setCreateForm({ ...createForm, roleSlug: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                <option value="student">Student</option>
+                <option value="instructor">Instructor</option>
+                <option value="teaching_assistant">Teaching Assistant</option>
+              </select>
+            </div>
+          </div>
+          <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+            <button type="button" onClick={() => setCreateOpen(false)} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold">Cancel</button>
+            <button type="submit" className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold">Create Account</button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      {/* ── Edit User modal ──────────────────────────────────────────────── */}
+      <ModalDialog isOpen={editOpen} onClose={() => { setEditOpen(false); setEditingUser(null); }}
+        title={`Edit User: ${editingUser?.email || ''}`}>
+        {editingUser && (
+          <form onSubmit={handleSaveEdit} className="space-y-3.5 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">First Name</label>
+                <input required value={editForm.firstName} onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Last Name</label>
+                <input required value={editForm.lastName} onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Account Status</label>
+                <select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">System Role</label>
+                {(editingUser.roles || []).some((r) => r.slug === 'super_admin') ? (
+                  <div className="w-full px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 font-bold flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5" /> Super Admin (Locked)
+                  </div>
+                ) : (
+                  <select value={editForm.roleSlug} onChange={(e) => setEditForm({ ...editForm, roleSlug: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-medium">
+                    <option value="student">Student</option>
+                    <option value="instructor">Instructor</option>
+                    <option value="teaching_assistant">Teaching Assistant</option>
+                    <option value="academic_admin">Academic Admin</option>
+                  </select>
+                )}
+              </div>
+            </div>
+            <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+              <button type="button" onClick={() => { setEditOpen(false); setEditingUser(null); }} className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 font-semibold">Cancel</button>
+              <button type="submit" className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold">Save Changes</button>
+            </div>
+          </form>
+        )}
+      </ModalDialog>
+
+      {/* ── Reset Password modal ────────────────────────────────────────── */}
+      {resetUser && (
+        <ModalDialog isOpen title={`Reset Password — ${resetUser.email}`} onClose={() => { setResetUser(null); setResetResult(null); }}
+          maxWidth="max-w-md">
+          {resetResult ? (
+            <div className="space-y-4">
+              <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
+                <p className="text-sm font-semibold text-emerald-800 mb-2">Password reset successfully.</p>
+                <p className="text-xs text-slate-600">The temporary password for <strong>{resetResult.email}</strong> is:</p>
+                <div className="mt-2 p-3 bg-white rounded-lg border border-slate-300 font-mono text-sm font-bold text-slate-900 select-all">
+                  {resetResult.temporaryPassword}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-2">Share this password with the user. They should change it upon next login.</p>
+              </div>
+              <div className="flex justify-end">
+                <button onClick={() => { setResetUser(null); setResetResult(null); }}
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium hover:bg-slate-50">Close</button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleResetPassword} className="space-y-4 text-xs">
+              <p className="text-slate-600">
+                Reset the password for <strong>{resetUser.email}</strong> ({resetUser.firstName} {resetUser.lastName}).
+                Leave blank to use the default <code className="bg-slate-100 px-1 rounded">Password@123</code>.
+              </p>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">New Password <span className="text-slate-400 font-normal">(optional)</span></label>
+                <input type="text" value={resetPasswordValue}
+                  onChange={(e) => setResetPasswordValue(e.target.value)}
+                  placeholder="Password@123"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono" />
+              </div>
+              <p className="text-[11px] text-amber-600">This will also unlock the account and clear any failed login attempts.</p>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => { setResetUser(null); }}
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium hover:bg-slate-50">Cancel</button>
+                <button type="submit" disabled={resetMutation.isPending}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold disabled:opacity-50">
+                  <Key className="w-4 h-4" /> {resetMutation.isPending ? 'Resetting…' : 'Reset Password'}
+                </button>
+              </div>
+            </form>
+          )}
+        </ModalDialog>
+      )}
+    </div>
+  );
+}
+
+export function AcademicAnalyticsPage() {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['dashboard', 'academic_admin'],
+    queryFn: lmsApi.getDashboardSummary
+  });
+
+  const { data: classReport } = useQuery({
+    queryKey: ['reports', 'classSummary', ''],
+    queryFn: () => lmsApi.getReport({ type: 'classSummary', format: 'json' })
+  });
+
+  if (isLoading) return <LoadingState label="Loading academic analytics…" />;
+  if (error) return <ErrorState message={extractErrorMessage(error)} onRetry={refetch} />;
+
+  const d = data?.data || {};
+  const m = d.metrics || {};
+  const dash = data?.data || {};
+
+  // ── Grade approval status distribution for pie chart ────────────────────
+  const gradeStatusData = (() => {
+    const classes = dash.classesAtAGlance || [];
+    const counts = {};
+    classes.forEach((c) => {
+      const status = c.finalGradesStatus || 'in_progress';
+      counts[status] = (counts[status] || 0) + 1;
+    });
+    const labels = {
+      in_progress: 'In Progress',
+      submitted_for_approval: 'Submitted',
+      approved: 'Approved',
+      published: 'Published',
+      returned: 'Returned'
+    };
+    const colors = ['#3b82f6', '#f59e0b', '#10b981', '#059669', '#ef4444'];
+    return Object.entries(counts).map(([key, value], i) => ({
+      name: labels[key] || key,
+      value,
+      color: colors[i] || '#94a3b8'
+    }));
+  })();
+
+  // ── Class capacity utilization data ──────────────────────────────────────
+  const capacityData = (dash.classesAtAGlance || []).map((c) => ({
+    name: c.sectionCode,
+    enrolled: c.enrolledCount || 0,
+    capacity: c.capacity || 40,
+    fillRate: c.capacity > 0 ? Math.round((c.enrolledCount / c.capacity) * 100) : 0
+  }));
+
+  // ── Department summary data ──────────────────────────────────────────────
+  const deptData = dash.departmentSummary || [];
+
+  // ── Enrollment by program ────────────────────────────────────────────────
+  const enrollmentData = (dash.enrollmentByProgram || []).map((p) => ({
+    name: p.programCode,
+    fullName: p.programName,
+    students: p.enrollments || 0
+  }));
+
+  // ── Class report data from the reports API ──────────────────────────────
+  const classRows = classReport?.data?.rows || [];
+
+  // ── Summary stats ───────────────────────────────────────────────────────
+  const totalClasses = m.totalClasses ?? 0;
+  const totalEnrollments = m.totalEnrollments ?? 0;
+  const totalCourses = m.totalCourses ?? 0;
+  const totalDepartments = m.totalDepartments ?? 0;
+  const unassignedCount = m.unassignedClassesCount ?? 0;
+  const pendingApprovals = m.pendingGradeApprovalsCount ?? 0;
+  const activeSemester = m.activeSemester || 'Not configured';
+
+  // ── Average enrollment per class ────────────────────────────────────────
+  const avgEnrollment = totalClasses > 0 ? Math.round(totalEnrollments / totalClasses) : 0;
+
+  // ── Fill rate (overall capacity) ────────────────────────────────────────
+  const totalCapacity = capacityData.reduce((a, c) => a + c.capacity, 0);
+  const totalEnrolled = capacityData.reduce((a, c) => a + c.enrolled, 0);
+  const overallFillRate = totalCapacity > 0 ? Math.round((totalEnrolled / totalCapacity) * 100) : 0;
+
+  const PIE_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#059669', '#ef4444', '#8b5cf6', '#ec4899'];
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        badge="Academic Intelligence"
+        title="Institutional Analytics & Performance Insights"
+        subtitle={`Active Term: ${activeSemester}${m.activeAcademicYear ? ` · ${m.activeAcademicYear}` : ''}`}
+      />
+
+      {/* ── Overview stat cards ──────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="Total Enrollments"
+          value={totalEnrollments}
+          subtitle={`Across ${totalClasses} class sections`}
+          icon={Users}
+          accent="blue"
+        />
+        <StatCard
+          title="Catalog Courses"
+          value={totalCourses}
+          subtitle={`In ${totalDepartments} departments`}
+          icon={BookOpen}
+          accent="indigo"
+        />
+        <StatCard
+          title="Avg Enrollment / Class"
+          value={avgEnrollment}
+          subtitle={`${overallFillRate}% overall capacity fill`}
+          icon={TrendingUp}
+          accent="emerald"
+        />
+        <StatCard
+          title="Pending Approvals"
+          value={pendingApprovals}
+          subtitle={unassignedCount > 0 ? `${unassignedCount} unassigned classes` : 'All classes assigned'}
+          icon={ClipboardCheck}
+          accent="amber"
+        />
+      </div>
+
+      {/* ── Charts row 1: Enrollment by Program + Grade Status ────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Enrollment by Program — Bar Chart */}
+        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+          <h2 className="text-base font-bold text-slate-900 mb-1">Enrollment by Degree Program</h2>
+          <p className="text-xs text-slate-500 mb-4">Active student distribution across degree programs</p>
+          <div className="h-72">
+            {enrollmentData.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+                No enrollment data available for the current term.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={enrollmentData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    formatter={(val, _, props) => [val, props.payload.fullName]}
+                    labelFormatter={(label) => `Program: ${label}`}
+                  />
+                  <Bar dataKey="students" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
+        {/* Grade Approval Status — Pie/Donut Chart */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+          <h2 className="text-base font-bold text-slate-900 mb-1">Grade Approval Status</h2>
+          <p className="text-xs text-slate-500 mb-4">Distribution across all class sections</p>
+          <div className="h-72">
+            {gradeStatusData.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+                No class data available.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={gradeStatusData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={45}
+                    outerRadius={80}
+                    paddingAngle={3}
+                  >
+                    {gradeStatusData.map((entry, i) => (
+                      <Cell key={i} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(val, name) => [val, name]} />
+                  <Legend
+                    verticalAlign="bottom"
+                    iconType="circle"
+                    wrapperStyle={{ fontSize: 11 }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Charts row 2: Class Capacity Utilization ───────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+        <h2 className="text-base font-bold text-slate-900 mb-1">Class Capacity Utilization</h2>
+        <p className="text-xs text-slate-500 mb-4">Enrolled vs. maximum capacity per class section</p>
+        <div className="h-72">
+          {capacityData.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+              No class sections available for the current term.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={capacityData} margin={{ top: 5, right: 10, left: 0, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-25} textAnchor="end" height={50} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                <Tooltip
+                  formatter={(val, name) => [val, name === 'enrolled' ? 'Enrolled' : 'Capacity']}
+                  labelFormatter={(label) => `Section: ${label}`}
+                />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="capacity" fill="#e2e8f0" name="Capacity" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="enrolled" fill="#3b82f6" name="Enrolled" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* ── Department Overview Table ────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-200">
+          <h2 className="text-base font-bold text-slate-900">Department Performance Overview</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Programs, courses, and leadership across departments</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
+              <tr>
+                <th className="px-4 py-3">Code</th>
+                <th className="px-4 py-3">Department</th>
+                <th className="px-4 py-3">Head</th>
+                <th className="px-4 py-3 text-center">Programs</th>
+                <th className="px-4 py-3 text-center">Courses</th>
+                <th className="px-4 py-3">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {deptData.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">No departments configured.</td></tr>
+              )}
+              {deptData.map((dept) => (
+                <tr key={dept.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 font-mono font-bold text-blue-700">{dept.code}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{dept.name}</td>
+                  <td className="px-4 py-3 text-slate-600">{dept.headName || <span className="text-slate-400 italic">TBA</span>}</td>
+                  <td className="px-4 py-3 text-center font-semibold">{dept.programCount ?? 0}</td>
+                  <td className="px-4 py-3 text-center font-semibold">{dept.courseCount ?? 0}</td>
+                  <td className="px-4 py-3"><StatusBadge status={dept.status || 'active'} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Classes at a Glance ───────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Classes table */}
+        <div className="lg:col-span-2">
+          <ClassesThisTermTable
+            classes={dash.classesAtAGlance || []}
+            activeSemester={m.activeSemester}
+            rowsPerPageDefault={5}
+          />
+        </div>
+
+        {/* Quick insights sidebar */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+          <h2 className="text-base font-bold text-slate-900">Quick Insights</h2>
+
+          {/* Insight: Unassigned classes */}
+          <div className={`p-3 rounded-lg border ${unassignedCount > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+            <div className="flex items-center gap-2">
+              {unassignedCount > 0
+                ? <AlertTriangle className="w-4 h-4 text-amber-600" />
+                : <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+              <p className="text-xs font-semibold text-slate-700">Instructor Assignments</p>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              {unassignedCount > 0
+                ? `${unassignedCount} class section${unassignedCount > 1 ? 's' : ''} ${unassignedCount > 1 ? 'have' : 'has'} no assigned instructor.`
+                : 'All class sections have instructors assigned.'}
+            </p>
+          </div>
+
+          {/* Insight: Grade approvals */}
+          <div className={`p-3 rounded-lg border ${pendingApprovals > 0 ? 'bg-blue-50 border-blue-200' : 'bg-emerald-50 border-emerald-200'}`}>
+            <div className="flex items-center gap-2">
+              <ClipboardCheck className="w-4 h-4 text-blue-600" />
+              <p className="text-xs font-semibold text-slate-700">Grade Approvals</p>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              {pendingApprovals > 0
+                ? `${pendingApprovals} class section${pendingApprovals > 1 ? 's' : ''} awaiting your approval.`
+                : 'All submitted grades have been reviewed.'}
+            </p>
+          </div>
+
+          {/* Insight: Capacity */}
+          <div className="p-3 rounded-lg border bg-slate-50 border-slate-200">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-slate-600" />
+              <p className="text-xs font-semibold text-slate-700">Capacity Utilization</p>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              {totalEnrolled} of {totalCapacity} seats filled ({overallFillRate}%).
+              {overallFillRate >= 90 ? ' Near full capacity.' : overallFillRate >= 70 ? ' Good utilization.' : ' Room available.'}
+            </p>
+          </div>
+
+          {/* Insight: Active term */}
+          <div className="p-3 rounded-lg border bg-indigo-50 border-indigo-200">
+            <div className="flex items-center gap-2">
+              <GraduationCap className="w-4 h-4 text-indigo-600" />
+              <p className="text-xs font-semibold text-slate-700">Active Term</p>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              {activeSemester}{m.activeAcademicYear ? ` · ${m.activeAcademicYear}` : ''}
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

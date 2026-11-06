@@ -28,6 +28,8 @@ const MODEL_ORDER = [
   'LessonProgress',
   'CourseProgress',
   'GradeCategory',
+  'AttendanceSession',
+  'AttendanceRecord',
   'Assignment',
   'AssignmentAttachment',
   'GradingRubric',

@@ -450,6 +450,46 @@ async function deleteAnnouncement(req, res, next) {
   }
 }
 
+async function getAnnouncementById(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    if (!id || Number.isNaN(id)) throw new AppError('Invalid announcement ID.', 400);
+
+    const announcement = await Announcement.findByPk(id, {
+      include: [
+        { model: User, as: 'author', attributes: ['id', 'firstName', 'lastName', 'email'] },
+        { model: ClassSection, as: 'classSection', attributes: ['id', 'sectionCode', 'name'] }
+      ]
+    });
+    if (!announcement) throw new AppError('Announcement not found.', 404, 'ANNOUNCEMENT_NOT_FOUND');
+
+    return res.status(200).json({ success: true, data: { announcement } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function toggleAnnouncementPin(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    if (!id || Number.isNaN(id)) throw new AppError('Invalid announcement ID.', 400);
+
+    const announcement = await Announcement.findByPk(id);
+    if (!announcement) throw new AppError('Announcement not found.', 404, 'ANNOUNCEMENT_NOT_FOUND');
+
+    const newPinState = !announcement.isPinned;
+    await announcement.update({ isPinned: newPinState });
+
+    return res.status(200).json({
+      success: true,
+      message: `Announcement ${newPinState ? 'pinned' : 'unpinned'}.`,
+      data: { isPinned: newPinState }
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 // ============================================================================
 // DELETE — DISCUSSION THREADS
 // ============================================================================
@@ -498,9 +538,11 @@ async function endorseDiscussionPost(req, res, next) {
 
 module.exports = {
   listAnnouncements,
+  getAnnouncementById,
   createAnnouncement,
   updateAnnouncement,
   deleteAnnouncement,
+  toggleAnnouncementPin,
   listDiscussions,
   createDiscussionThread,
   replyToDiscussionThread,
