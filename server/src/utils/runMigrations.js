@@ -1,7 +1,8 @@
 const { sequelize, Sequelize } = require('../models');
 const migrations = [
   ['20261028000001-create-lms-schema.js', require('../migrations/20261028000001-create-lms-schema')],
-  ['20261103000001-add-student-placements.js', require('../migrations/20261103000001-add-student-placements')]
+  ['20261103000001-add-student-placements.js', require('../migrations/20261103000001-add-student-placements')],
+  ['20261105000001-widen-avatar-url.js', require('../migrations/20261105000001-widen-avatar-url')]
 ];
 const logger = require('../config/logger');
 

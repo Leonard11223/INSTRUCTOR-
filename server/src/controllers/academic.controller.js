@@ -972,6 +972,18 @@ async function getClassById(req, res, next) {
     });
 
     if (!classSection) throw new AppError('Class section not found.', 404);
+
+    // Verify the caller has access to this specific section.
+    // TAs must be explicitly assigned AND have canViewRoster enabled.
+    const { verifyClassAccess } = require('../middleware/auth.middleware');
+    await verifyClassAccess(req.user, classSection.id, {
+      allowAdmin: true,
+      allowInstructor: true,
+      allowTA: true,
+      requiredTaFlag: 'canViewRoster',
+      allowStudent: true
+    });
+
     return res.status(200).json({ success: true, data: { classSection } });
   } catch (err) {
     return next(err);
@@ -1250,6 +1262,32 @@ async function listEnrollments(req, res, next) {
       where.studentId = req.user.id;
     }
 
+    // Teaching Assistants may only query enrollments for sections they are
+    // explicitly assigned to, and only when canViewRoster is enabled.
+    // This prevents URL-manipulation access to unassigned sections.
+    if (req.user.primaryRole === 'teaching_assistant') {
+      if (!classId) {
+        // No classId supplied — scope to all assigned sections (safe: DB-enforced)
+        const assignments = await TeachingAssistantAssignment.findAll({
+          where: { taUserId: req.user.id, canViewRoster: true }
+        });
+        if (assignments.length === 0) {
+          return res.status(200).json({ success: true, data: { enrollments: [] } });
+        }
+        where.classId = assignments.map((a) => a.classId);
+      } else {
+        // Explicit classId — verify assignment + flag before proceeding
+        const { verifyClassAccess } = require('../middleware/auth.middleware');
+        await verifyClassAccess(req.user, classId, {
+          allowAdmin: false,
+          allowInstructor: false,
+          allowTA: true,
+          requiredTaFlag: 'canViewRoster',
+          allowStudent: false
+        });
+      }
+    }
+
     const enrollments = await ClassMembership.findAll({
       where,
       include: [
@@ -1378,6 +1416,21 @@ async function enrollStudent(req, res, next) {
       message: `You have been enrolled in ${classSection.name} (${classSection.courseOffering?.course?.code || ''}).`,
       destinationUrl: '/student/courses'
     });
+
+    // Notify TAs assigned to this section that the class roster has changed.
+    // Only the section code and class name are shared — no student identity.
+    const taAssignments = await TeachingAssistantAssignment.findAll({
+      where: { classId, canViewRoster: true }
+    });
+    for (const ta of taAssignments) {
+      await createNotification({
+        userId: ta.taUserId,
+        type: 'enrollment',
+        title: `New Student Enrolled: ${classSection.sectionCode}`,
+        message: `A new student has been enrolled in ${classSection.name}. Your class roster has been updated.`,
+        destinationUrl: '/ta/classes'
+      });
+    }
 
     await recordAudit({
       req,
@@ -1641,6 +1694,20 @@ async function updateEnrollmentStatus(req, res, next) {
         message: `Your enrollment request for ${membership.classSection?.sectionCode} has been approved.`,
         destinationUrl: '/student/courses'
       });
+
+      // Also notify TAs — roster has grown
+      const taAssignments = await TeachingAssistantAssignment.findAll({
+        where: { classId: membership.classId, canViewRoster: true }
+      });
+      for (const ta of taAssignments) {
+        await createNotification({
+          userId: ta.taUserId,
+          type: 'enrollment',
+          title: `New Student Enrolled: ${membership.classSection?.sectionCode}`,
+          message: `A student's enrollment request for ${membership.classSection?.sectionCode} has been approved. Your class roster has been updated.`,
+          destinationUrl: '/ta/classes'
+        });
+      }
     }
 
     return res.status(200).json({

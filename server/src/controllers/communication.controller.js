@@ -9,12 +9,16 @@ const {
   Notification,
   ClassMembership,
   ClassSection,
+  InstructorAssignment,
+  TeachingAssistantAssignment,
+  AuditLog,
   User
 } = require('../models');
 const { AppError } = require('../middleware/error.middleware');
 const { verifyClassAccess } = require('../middleware/auth.middleware');
 const { sanitizePlainText } = require('../utils/sanitizer');
 const { createNotification } = require('../utils/notifyUser');
+const { recordAudit } = require('../utils/auditLogger');
 
 // Announcements
 async function listAnnouncements(req, res, next) {
@@ -107,6 +111,21 @@ async function createAnnouncement(req, res, next) {
           destinationUrl: '/student/announcements'
         });
       }
+
+      // Notify TAs assigned to this section — they should see class announcements
+      // to stay informed and be able to answer student questions about them.
+      const taAssignments = await TeachingAssistantAssignment.findAll({
+        where: { classId: Number(classId) }
+      });
+      for (const ta of taAssignments) {
+        await createNotification({
+          userId: ta.taUserId,
+          type: 'announcement',
+          title: `New Announcement: ${announcement.title}`,
+          message: announcement.content.slice(0, 140),
+          destinationUrl: '/ta/announcements'
+        });
+      }
     }
 
     return res.status(201).json({
@@ -126,6 +145,33 @@ async function listDiscussions(req, res, next) {
     const where = {};
     if (classId) where.classId = Number(classId);
     if (courseId) where.courseId = Number(courseId);
+
+    // TAs may only see discussions from their explicitly assigned sections.
+    // This prevents them from reading unassigned class discussions by omitting classId.
+    if (req.user.primaryRole === 'teaching_assistant') {
+      const taAssignments = await TeachingAssistantAssignment.findAll({
+        where: { taUserId: req.user.id },
+        attributes: ['classId']
+      });
+      const allowedClassIds = taAssignments.map((a) => a.classId);
+
+      if (classId) {
+        // Explicit classId requested — verify it's in their assigned list
+        if (!allowedClassIds.includes(Number(classId))) {
+          throw new AppError(
+            'Forbidden: You do not have access to discussions in this class section.',
+            403,
+            'CLASS_ACCESS_DENIED'
+          );
+        }
+      } else {
+        // No classId — scope to all their assigned sections
+        if (allowedClassIds.length === 0) {
+          return res.status(200).json({ success: true, data: { threads: [] } });
+        }
+        where.classId = allowedClassIds;
+      }
+    }
 
     const threads = await DiscussionThread.findAll({
       where,
@@ -226,22 +272,85 @@ async function replyToDiscussionThread(req, res, next) {
 async function escalateOrResolveDiscussion(req, res, next) {
   try {
     const threadId = Number(req.params.threadId);
-    const { isResolved, isEscalated, escalationNote } = req.body;
+    const { isResolved, isEscalated, escalationNote, moderationNote } = req.body;
 
-    const thread = await DiscussionThread.findByPk(threadId);
+    const thread = await DiscussionThread.findByPk(threadId, {
+      include: [{ model: ClassSection, as: 'classSection', attributes: ['id', 'sectionCode', 'name'] }]
+    });
     if (!thread) throw new AppError('Discussion thread not found.', 404);
 
-    await verifyClassAccess(req.user, thread.classId, {
+    const access = await verifyClassAccess(req.user, thread.classId, {
       allowAdmin: true,
       allowInstructor: true,
       allowTA: true
     });
 
+    const willEscalate = isEscalated !== undefined ? Boolean(isEscalated) : thread.isEscalated;
+    const wasEscalated = thread.isEscalated;
+    const willResolve  = isResolved  !== undefined ? Boolean(isResolved)  : thread.isResolved;
+
+    // Require a moderation note when escalating to the instructor
+    if (willEscalate && !wasEscalated) {
+      const effectiveNote = escalationNote || moderationNote;
+      if (!effectiveNote || String(effectiveNote).trim().length < 5) {
+        throw new AppError(
+          'A moderation note (at least 5 characters) is required when escalating a discussion to the instructor.',
+          400,
+          'MODERATION_NOTE_REQUIRED'
+        );
+      }
+    }
+
     await thread.update({
-      isResolved: isResolved !== undefined ? Boolean(isResolved) : thread.isResolved,
-      isEscalated: isEscalated !== undefined ? Boolean(isEscalated) : thread.isEscalated,
-      escalationNote: escalationNote !== undefined ? escalationNote : thread.escalationNote
+      isResolved: willResolve,
+      isEscalated: willEscalate,
+      escalationNote: (escalationNote !== undefined ? escalationNote
+                     : moderationNote  !== undefined ? moderationNote
+                     : thread.escalationNote)
     });
+
+    // Audit the moderation action
+    const action = willEscalate && !wasEscalated ? 'DISCUSSION_ESCALATED_BY_TA'
+                 : !willEscalate && wasEscalated  ? 'DISCUSSION_ESCALATION_CLEARED'
+                 : willResolve && !thread.isResolved ? 'DISCUSSION_RESOLVED'
+                 : !willResolve && thread.isResolved ? 'DISCUSSION_REOPENED'
+                 : 'DISCUSSION_STATUS_UPDATED';
+
+    await recordAudit({
+      req,
+      action,
+      category: 'academic',
+      entityType: 'DiscussionThread',
+      entityId: thread.id,
+      metadata: {
+        classId: thread.classId,
+        sectionCode: thread.classSection?.sectionCode,
+        threadTitle: thread.title,
+        isResolved: willResolve,
+        isEscalated: willEscalate,
+        moderationNote: escalationNote || moderationNote || null,
+        moderatedBy: req.user.id,
+        moderatedByName: req.user.fullName,
+        moderatedByRole: req.user.primaryRole,
+      }
+    });
+
+    // Notify the section's instructor(s) when a discussion is newly escalated
+    if (willEscalate && !wasEscalated) {
+      const note = escalationNote || moderationNote || '';
+      const instructors = await InstructorAssignment.findAll({
+        where: { classId: thread.classId }
+      });
+      for (const ia of instructors) {
+        await createNotification({
+          userId: ia.instructorId,
+          type: 'announcement',
+          title: `Discussion Escalated in ${thread.classSection?.sectionCode || 'a class section'}`,
+          message: `${req.user.fullName} escalated the discussion "${thread.title}" for your review${note ? `: ${note}` : '.'}`,
+          destinationUrl: '/instructor/discussions'
+        });
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -456,15 +565,52 @@ async function deleteAnnouncement(req, res, next) {
 
 async function deleteDiscussionThread(req, res, next) {
   try {
-    const thread = await DiscussionThread.findByPk(Number(req.params.threadId));
+    const thread = await DiscussionThread.findByPk(Number(req.params.threadId), {
+      include: [{ model: ClassSection, as: 'classSection', attributes: ['id', 'sectionCode'] }]
+    });
     if (!thread) throw new AppError('Discussion thread not found.', 404);
 
-    // Only the author, instructor of the class, or admin can delete
-    if (thread.authorId !== req.user.id) {
-      await verifyClassAccess(req.user, thread.classId, { allowAdmin: true, allowInstructor: true });
+    const isAuthor = thread.authorId === req.user.id;
+    const isTA     = req.user.roles?.includes('teaching_assistant');
+
+    if (isAuthor) {
+      // Authors can always delete their own thread, but TAs must be in the section
+      if (isTA) {
+        await verifyClassAccess(req.user, thread.classId, {
+          allowAdmin: false,
+          allowInstructor: false,
+          allowTA: true
+        });
+      }
+    } else {
+      // Non-authors: only admins and instructors of the section may delete
+      await verifyClassAccess(req.user, thread.classId, {
+        allowAdmin: true,
+        allowInstructor: true,
+        allowTA: false
+      });
     }
 
+    const threadSnapshot = { id: thread.id, title: thread.title, classId: thread.classId, sectionCode: thread.classSection?.sectionCode };
     await thread.destroy();
+
+    await recordAudit({
+      req,
+      action: 'DISCUSSION_THREAD_DELETED',
+      category: 'academic',
+      entityType: 'DiscussionThread',
+      entityId: threadSnapshot.id,
+      metadata: {
+        classId: threadSnapshot.classId,
+        sectionCode: threadSnapshot.sectionCode,
+        threadTitle: threadSnapshot.title,
+        deletedBy: req.user.id,
+        deletedByName: req.user.fullName,
+        deletedByRole: req.user.primaryRole,
+        wasAuthor: isAuthor,
+      }
+    });
+
     return res.status(200).json({ success: true, message: 'Discussion thread deleted.' });
   } catch (err) {
     return next(err);
@@ -496,6 +642,104 @@ async function endorseDiscussionPost(req, res, next) {
   } catch (err) { return next(err); }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   GET /discussions/:threadId/moderation-history
+   Returns the full audit trail for a specific discussion thread.
+   Accessible by TAs (verified against their assigned sections), instructors,
+   and admins. Gives TAs visibility into who moderated a thread and when.
+═══════════════════════════════════════════════════════════════════════════ */
+async function getDiscussionModerationHistory(req, res, next) {
+  try {
+    const threadId = Number(req.params.threadId);
+    if (!threadId || Number.isNaN(threadId)) {
+      throw new AppError('Invalid thread identifier.', 400, 'INVALID_THREAD_ID');
+    }
+
+    const thread = await DiscussionThread.findByPk(threadId, {
+      attributes: ['id', 'classId', 'title', 'isResolved', 'isEscalated', 'escalationNote'],
+      include: [{ model: ClassSection, as: 'classSection', attributes: ['id', 'sectionCode', 'name'] }]
+    });
+    if (!thread) throw new AppError('Discussion thread not found.', 404);
+
+    // Verify the caller has access to this thread's class section
+    await verifyClassAccess(req.user, thread.classId, {
+      allowAdmin: true,
+      allowInstructor: true,
+      allowTA: true,
+    });
+
+    const MODERATION_ACTIONS = [
+      'DISCUSSION_ESCALATED_BY_TA',
+      'DISCUSSION_ESCALATION_CLEARED',
+      'DISCUSSION_RESOLVED',
+      'DISCUSSION_REOPENED',
+      'DISCUSSION_STATUS_UPDATED',
+      'DISCUSSION_THREAD_DELETED',
+    ];
+
+    const logs = await AuditLog.findAll({
+      where: {
+        entityType: 'DiscussionThread',
+        entityId: String(threadId),
+        action: MODERATION_ACTIONS,
+      },
+      include: [{
+        model: User,
+        as: 'actor',
+        attributes: ['id', 'firstName', 'lastName', 'email'],
+        required: false,
+      }],
+      order: [['createdAt', 'DESC']],
+      limit: 100,
+    });
+
+    const ACTION_LABELS = {
+      DISCUSSION_ESCALATED_BY_TA:    'Escalated to Instructor',
+      DISCUSSION_ESCALATION_CLEARED: 'Escalation Cleared',
+      DISCUSSION_RESOLVED:           'Marked Resolved',
+      DISCUSSION_REOPENED:           'Reopened',
+      DISCUSSION_STATUS_UPDATED:     'Status Updated',
+      DISCUSSION_THREAD_DELETED:     'Thread Deleted',
+    };
+
+    const history = logs.map((log) => {
+      const meta = log.metadata || {};
+      return {
+        id: log.id,
+        action: log.action,
+        actionLabel: ACTION_LABELS[log.action] || log.action,
+        actorName: log.actor
+          ? `${log.actor.firstName} ${log.actor.lastName}`
+          : (meta.moderatedByName || meta.deletedByName || 'Unknown'),
+        actorRole: meta.moderatedByRole || meta.deletedByRole || log.actorRole || null,
+        moderationNote: meta.moderationNote || null,
+        isResolved: meta.isResolved ?? null,
+        isEscalated: meta.isEscalated ?? null,
+        timestamp: log.createdAt,
+        severity: log.severity,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        threadId,
+        classId: thread.classId,
+        sectionCode: thread.classSection?.sectionCode,
+        threadTitle: thread.title,
+        currentState: {
+          isResolved: thread.isResolved,
+          isEscalated: thread.isEscalated,
+          escalationNote: thread.escalationNote,
+        },
+        history,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   listAnnouncements,
   createAnnouncement,
@@ -507,6 +751,7 @@ module.exports = {
   escalateOrResolveDiscussion,
   deleteDiscussionThread,
   endorseDiscussionPost,
+  getDiscussionModerationHistory,
   listConversations,
   startOrSendMessage,
   listNotifications,

@@ -8,6 +8,7 @@ const {
   Course,
   Semester,
   InstructorAssignment,
+  TeachingAssistantAssignment,
   User,
   GradeCategory
 } = require('../models');
@@ -128,6 +129,20 @@ async function joinClassByCode(req, res, next) {
         title: `New Student Joined: ${classSection.sectionCode}`,
         message: `${req.user.fullName} joined your class using the join code.`,
         destinationUrl: '/instructor/classes'
+      });
+    }
+
+    // Notify TAs: roster has a new student — no student identity exposed
+    const taAssignments = await TeachingAssistantAssignment.findAll({
+      where: { classId: classSection.id, canViewRoster: true }
+    });
+    for (const ta of taAssignments) {
+      await createNotification({
+        userId: ta.taUserId,
+        type: 'enrollment',
+        title: `New Student Joined: ${classSection.sectionCode}`,
+        message: `A student has joined ${classSection.sectionCode} using the class join code. Your roster has been updated.`,
+        destinationUrl: '/ta/classes'
       });
     }
 

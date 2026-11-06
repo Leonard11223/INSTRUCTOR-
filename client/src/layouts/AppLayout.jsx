@@ -31,7 +31,9 @@ import {
   Lock,
   ChevronsLeft,
   ChevronsRight,
-  ChevronLeft
+  ChevronLeft,
+  Mail,
+  Info
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { lmsApi } from '../services/api';
@@ -71,11 +73,30 @@ const NAVIGATION_BY_ROLE = {
   ],
   teaching_assistant: [
     { to: '/ta/dashboard', label: 'TA Dashboard', icon: LayoutDashboard },
-    { to: '/ta/classes', label: 'Assigned Classes & Roster', icon: Users },
-    { to: '/ta/submissions', label: 'Submission Review & Flags', icon: ClipboardCheck },
-    { to: '/ta/resources', label: 'Learning Resources', icon: BookOpen },
-    { to: '/ta/discussions', label: 'Discussions & Escalations', icon: MessageSquare },
-    { to: '/messages', label: 'Messages', icon: Bell }
+    {
+      id: 'ta-classes',
+      label: 'Sections & Students',
+      icon: Users,
+      defaultOpen: true,
+      children: [
+        { to: '/ta/classes',   label: 'Class Roster'      },
+        { to: '/ta/progress',  label: 'Student Progress'  },
+        { to: '/ta/activity',  label: 'Student Activity'  }
+      ]
+    },
+    {
+      id: 'ta-submissions',
+      label: 'Submissions',
+      icon: ClipboardCheck,
+      defaultOpen: true,
+      children: [
+        { to: '/ta/submissions', label: 'Review & Feedback' },
+      ]
+    },
+    { to: '/ta/discussions',   label: 'Discussion Moderation', icon: MessageSquare },
+    { to: '/ta/announcements', label: 'Announcements',         icon: Megaphone     },
+    { to: '/messages',         label: 'Messages',              icon: Bell          },
+    { to: '/profile',          label: 'Profile & Settings',    icon: Settings      }
   ],
   student: [
     { to: '/student/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -187,7 +208,9 @@ export default function AppLayout() {
   const { data: notifData } = useQuery({
     queryKey: ['notifications'],
     queryFn: lmsApi.listNotifications,
-    enabled: Boolean(user)
+    enabled: Boolean(user),
+    refetchInterval: 60_000,   // poll every 60 s so new TA notifications appear
+    staleTime: 30_000,
   });
 
   const notifications = notifData?.data?.notifications || [];
@@ -195,6 +218,11 @@ export default function AppLayout() {
 
   const markAllMutation = useMutation({
     mutationFn: () => lmsApi.markNotificationRead('all'),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] })
+  });
+
+  const markOneMutation = useMutation({
+    mutationFn: (id) => lmsApi.markNotificationRead(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] })
   });
 
@@ -442,8 +470,11 @@ export default function AppLayout() {
                 : 'gap-3 px-3 py-2'
             }`}
           >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-xs font-bold text-white">
-              {(user?.fullName || 'Student').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-xs font-bold text-white overflow-hidden">
+              {user?.avatarUrl
+                ? <img src={user.avatarUrl} alt={user.fullName} className="h-10 w-10 rounded-full object-cover" />
+                : (user?.fullName || 'Student').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()
+              }
             </span>
             {!sidebarCollapsed && <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-white">{user?.fullName}</p>
@@ -544,58 +575,139 @@ export default function AppLayout() {
               <button
                 type="button"
                 onClick={() => setNotifOpen((prev) => !prev)}
-                aria-label="Notifications"
+                aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
                 className="relative p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
               >
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
-                  <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
-                    {unreadCount}
+                  <span className="absolute top-1 right-1 min-w-[1rem] h-4 px-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+                    {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
               </button>
 
               {notifOpen && (
-                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-xl border border-slate-200 shadow-xl z-50 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                      Notifications ({unreadCount} unread)
-                    </span>
+                <div className="absolute right-0 mt-2 w-80 sm:w-[22rem] bg-white rounded-xl border border-slate-200 shadow-xl z-50 overflow-hidden flex flex-col max-h-[80vh]">
+                  {/* Panel header */}
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <Bell className="w-3.5 h-3.5 text-slate-500" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                        Notifications
+                      </span>
+                      {unreadCount > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
+                          {unreadCount}
+                        </span>
+                      )}
+                    </div>
                     {unreadCount > 0 && (
                       <button
                         type="button"
                         onClick={() => markAllMutation.mutate()}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-800"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 transition-colors"
                       >
                         <CheckCheck className="w-3.5 h-3.5" />
                         Mark all read
                       </button>
                     )}
                   </div>
-                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+
+                  {/* Notification list */}
+                  <div className="overflow-y-auto divide-y divide-slate-100 flex-1">
                     {notifications.length === 0 ? (
-                      <p className="p-6 text-center text-xs text-slate-500">No notifications yet.</p>
+                      <div className="flex flex-col items-center justify-center py-10 text-center px-4">
+                        <Bell className="w-8 h-8 text-slate-200 mb-2" />
+                        <p className="text-xs font-semibold text-slate-500">No notifications yet</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">New activity will appear here.</p>
+                      </div>
                     ) : (
-                      notifications.map((n) => (
-                        <div
-                          key={n.id}
-                          onClick={() => {
-                            setNotifOpen(false);
-                            if (n.destinationUrl) navigate(n.destinationUrl);
-                          }}
-                          className={`p-3.5 hover:bg-slate-50 cursor-pointer transition-colors ${
-                            !n.isRead ? 'bg-blue-50/40' : ''
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-xs font-semibold text-slate-900">{n.title}</p>
-                            {!n.isRead && <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-1" />}
+                      notifications.map((n) => {
+                        // Map notification type → icon + accent colour
+                        const TYPE_META = {
+                          assignment:   { Icon: ClipboardCheck, color: 'text-blue-500',   bg: 'bg-blue-50',   label: 'Assignment'   },
+                          announcement: { Icon: Megaphone,      color: 'text-violet-500', bg: 'bg-violet-50', label: 'Announcement' },
+                          enrollment:   { Icon: Users,          color: 'text-emerald-500',bg: 'bg-emerald-50',label: 'Enrollment'   },
+                          grade:        { Icon: Award,          color: 'text-amber-500',  bg: 'bg-amber-50',  label: 'Grade'        },
+                          feedback:     { Icon: MessageSquare,  color: 'text-indigo-500', bg: 'bg-indigo-50', label: 'Feedback'     },
+                          assessment:   { Icon: HelpCircle,     color: 'text-rose-500',   bg: 'bg-rose-50',   label: 'Assessment'   },
+                          message:      { Icon: Mail,           color: 'text-sky-500',    bg: 'bg-sky-50',    label: 'Message'      },
+                          deadline:     { Icon: Calendar,       color: 'text-orange-500', bg: 'bg-orange-50', label: 'Deadline'     },
+                          completion:   { Icon: CheckCheck,     color: 'text-emerald-600',bg: 'bg-emerald-50',label: 'Completion'   },
+                          certificate:  { Icon: ShieldCheck,    color: 'text-green-600',  bg: 'bg-green-50',  label: 'Certificate'  },
+                          system:       { Icon: Info,           color: 'text-slate-500',  bg: 'bg-slate-100', label: 'System'       },
+                        };
+                        const meta = TYPE_META[n.type] || TYPE_META.system;
+                        const { Icon, color, bg, label } = meta;
+
+                        // Relative timestamp
+                        const diff = Date.now() - new Date(n.createdAt).getTime();
+                        const mins = Math.floor(diff / 60000);
+                        let timeLabel;
+                        if (mins < 1)       timeLabel = 'Just now';
+                        else if (mins < 60) timeLabel = `${mins}m ago`;
+                        else if (mins < 1440) timeLabel = `${Math.floor(mins / 60)}h ago`;
+                        else                timeLabel = new Date(n.createdAt).toLocaleDateString();
+
+                        return (
+                          <div
+                            key={n.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              // Mark as read + navigate
+                              if (!n.isRead) markOneMutation.mutate(n.id);
+                              setNotifOpen(false);
+                              if (n.destinationUrl) navigate(n.destinationUrl);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                if (!n.isRead) markOneMutation.mutate(n.id);
+                                setNotifOpen(false);
+                                if (n.destinationUrl) navigate(n.destinationUrl);
+                              }
+                            }}
+                            className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 outline-none ${
+                              !n.isRead ? 'bg-blue-50/50' : ''
+                            }`}
+                          >
+                            {/* Type icon */}
+                            <div className={`${bg} p-1.5 rounded-lg shrink-0 mt-0.5`} aria-hidden="true">
+                              <Icon className={`w-3.5 h-3.5 ${color}`} />
+                            </div>
+
+                            {/* Content */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-1.5">
+                                <p className={`text-[13px] leading-snug font-semibold truncate ${!n.isRead ? 'text-slate-900' : 'text-slate-700'}`}>
+                                  {n.title}
+                                </p>
+                                {!n.isRead && (
+                                  <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-1" aria-label="Unread" />
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2 leading-relaxed">{n.message}</p>
+                              <div className="flex items-center gap-1.5 mt-1">
+                                <span className={`text-[10px] font-semibold uppercase tracking-wider ${color}`}>{label}</span>
+                                <span className="text-slate-300 text-[10px]">·</span>
+                                <span className="text-[10px] text-slate-400">{timeLabel}</span>
+                              </div>
+                            </div>
                           </div>
-                          <p className="text-xs text-slate-600 mt-1">{n.message}</p>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
+
+                  {/* Footer */}
+                  {notifications.length > 0 && (
+                    <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 shrink-0 text-center">
+                      <p className="text-[11px] text-slate-400">
+                        Showing {notifications.length} most recent · Click to mark as read
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -608,8 +720,11 @@ export default function AppLayout() {
                 aria-label="Open profile menu"
                 className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700"
               >
-                <span className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center">
-                  {(user?.fullName || 'Student').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
+                <span className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center overflow-hidden shrink-0">
+                  {user?.avatarUrl
+                    ? <img src={user.avatarUrl} alt={user.fullName} className="w-7 h-7 rounded-full object-cover" />
+                    : (user?.fullName || 'Student').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()
+                  }
                 </span>
                 <span className="hidden text-sm font-semibold md:inline">{user?.fullName}</span>
                 <ChevronDown className="w-3.5 h-3.5" />

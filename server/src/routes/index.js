@@ -52,6 +52,7 @@ router.put('/auth/profile', requireAuth, authCtrl.updateProfile);
 
 // 2. /api/dashboards
 router.get('/dashboards/summary', requireAuth, dashCtrl.getDashboardSummary);
+router.get('/dashboards/ta-student-monitoring/:classId', requireAuth, requireRole('teaching_assistant', 'instructor', 'academic_admin', 'super_admin'), dashCtrl.getTaStudentMonitoring);
 
 // 3. /api/users, /api/roles, /api/permissions, /api/settings, /api/audit-logs
 router.get('/users', requireAuth, requirePermission('users:read'), iamCtrl.listUsers);
@@ -147,6 +148,7 @@ router.get('/submissions', requireAuth, assessCtrl.listSubmissions);
 router.post('/submissions', requireAuth, uploadMiddleware.single('file'), assessCtrl.submitAssignmentWork);
 router.post('/assignments/:assignmentId/submit', requireAuth, uploadMiddleware.single('file'), assessCtrl.submitAssignmentWork);
 router.put('/submissions/:id/review', requireAuth, requirePermission('submissions:review'), assessCtrl.reviewOrGradeSubmission);
+router.get('/submissions/:id/escalation-history', requireAuth, assessCtrl.getEscalationHistory);
 
 router.get('/question-banks', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), assessCtrl.listQuestionBanks);
 router.post('/question-banks', requireAuth, requirePermission('questions:manage'), assessCtrl.createQuestionBank);
@@ -189,6 +191,7 @@ router.post('/discussions', requireAuth, commCtrl.createDiscussionThread);
 router.post('/discussions/:threadId/replies', requireAuth, commCtrl.replyToDiscussionThread);
 router.put('/discussions/:threadId/status', requireAuth, commCtrl.escalateOrResolveDiscussion);
 router.delete('/discussions/:threadId', requireAuth, commCtrl.deleteDiscussionThread);
+router.get('/discussions/:threadId/moderation-history', requireAuth, commCtrl.getDiscussionModerationHistory);
 router.put('/discussions/posts/:postId/endorse', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), commCtrl.endorseDiscussionPost);
 
 router.get('/messages', requireAuth, commCtrl.listConversations);

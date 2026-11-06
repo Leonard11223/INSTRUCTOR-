@@ -7,13 +7,16 @@ const {
   LessonProgress,
   CourseProgress,
   ClassMembership,
+  ClassSection,
+  CourseOffering,
+  TeachingAssistantAssignment,
   User
 } = require('../models');
 const env = require('../config/env');
 const { AppError } = require('../middleware/error.middleware');
 const { verifyClassAccess } = require('../middleware/auth.middleware');
 const { verifyUploadedFileSafety } = require('../middleware/upload.middleware');
-const { sanitizeRichHtml } = require('../utils/sanitizer');
+const { sanitizeRichHtml, sanitizePlainText } = require('../utils/sanitizer');
 const { recordAudit } = require('../utils/auditLogger');
 const { recalculateStudentCourseProgress } = require('../services/progress.service');
 const { moduleSchema, lessonSchema } = require('../validators/schemas');
@@ -170,6 +173,37 @@ async function listResources(req, res, next) {
     if (moduleId) where.moduleId = Number(moduleId);
     if (lessonId) where.lessonId = Number(lessonId);
 
+    // TAs may only list resources for courses in their assigned sections.
+    // This prevents enumeration of resources for unassigned courses.
+    if (req.user.primaryRole === 'teaching_assistant') {
+      const taAssignments = await TeachingAssistantAssignment.findAll({
+        where: { taUserId: req.user.id },
+        attributes: ['classId']
+      });
+      if (taAssignments.length === 0) {
+        return res.status(200).json({ success: true, data: { resources: [] } });
+      }
+      // Resolve courseIds from assigned classIds
+      const classSections = await ClassSection.findAll({
+        where: { id: taAssignments.map((a) => a.classId) },
+        include: [{ model: CourseOffering, as: 'courseOffering', attributes: ['courseId'] }]
+      });
+      const allowedCourseIds = [...new Set(
+        classSections.map((c) => c.courseOffering?.courseId).filter(Boolean)
+      )];
+      if (allowedCourseIds.length === 0) {
+        return res.status(200).json({ success: true, data: { resources: [] } });
+      }
+      // If an explicit courseId was requested, verify it's in the allowed set
+      if (courseId && !allowedCourseIds.includes(Number(courseId))) {
+        throw new AppError('Forbidden: You do not have access to resources for this course.', 403, 'CLASS_ACCESS_DENIED');
+      }
+      // Scope to only their courses if no explicit courseId was given
+      if (!courseId) {
+        where.courseId = allowedCourseIds;
+      }
+    }
+
     const resources = await LearningResource.findAll({
       where,
       order: [['id', 'DESC']]
@@ -198,6 +232,29 @@ async function createResource(req, res, next) {
       throw new AppError('courseId and title are required.', 400);
     }
 
+    // For TAs, verify they are assigned to a class that offers this course
+    // and that their assignment has canUploadResources enabled.
+    if (req.user.primaryRole === 'teaching_assistant') {
+      const classSection = await ClassSection.findOne({
+        include: [{
+          model: CourseOffering,
+          as: 'courseOffering',
+          where: { courseId: Number(courseId) },
+          required: true
+        }]
+      });
+      if (!classSection) {
+        throw new AppError('No class section found for this course.', 404, 'CLASS_NOT_FOUND');
+      }
+      // verifyClassAccess enforces canUploadResources per-class flag
+      await verifyClassAccess(req.user, classSection.id, {
+        allowAdmin: false,
+        allowInstructor: false,
+        allowTA: true,
+        requiredTaFlag: 'canUploadResources'
+      });
+    }
+
     let fileData = {};
     if (req.file) {
       const fullPath = path.join(env.UPLOAD_DIR, req.file.filename);
@@ -219,13 +276,22 @@ async function createResource(req, res, next) {
       courseId: Number(courseId),
       moduleId: moduleId ? Number(moduleId) : null,
       lessonId: lessonId ? Number(lessonId) : null,
-      title,
-      description: description || null,
+      title: sanitizePlainText(title),
+      description: description ? sanitizePlainText(description) : null,
       resourceType,
       externalUrl: externalUrl || null,
       isDownloadable: isDownloadable !== 'false' && isDownloadable !== false,
       uploadedBy: req.user.id,
       ...fileData
+    });
+
+    await recordAudit({
+      req,
+      action: 'RESOURCE_UPLOADED',
+      category: 'course',
+      entityType: 'LearningResource',
+      entityId: resource.id,
+      metadata: { courseId: resource.courseId, title: resource.title, uploadedBy: req.user.id, role: req.user.primaryRole }
     });
 
     return res.status(201).json({
@@ -243,6 +309,31 @@ async function downloadResourceFile(req, res, next) {
     const resource = await LearningResource.findByPk(req.params.id);
     if (!resource || !resource.storedFilename) {
       throw new AppError('Resource file not found.', 404);
+    }
+
+    // Verify the caller has access to at least one class section that offers this course.
+    // Students, TAs, and instructors must be enrolled/assigned to access course files.
+    // Admins always pass.
+    if (!req.user.roles.includes('super_admin') && !req.user.roles.includes('academic_admin')) {
+      const classSection = await ClassSection.findOne({
+        include: [{
+          model: CourseOffering,
+          as: 'courseOffering',
+          where: { courseId: resource.courseId },
+          required: true
+        }]
+      });
+
+      if (classSection) {
+        // This will throw if the caller has no relationship to this class
+        await verifyClassAccess(req.user, classSection.id, {
+          allowAdmin: true,
+          allowInstructor: true,
+          allowTA: true,
+          allowStudent: true
+        });
+      }
+      // If no class section exists for this course, allow access (course-level public resource)
     }
 
     const safeName = path.basename(resource.storedFilename);
@@ -318,11 +409,18 @@ async function getProgressAnalytics(req, res, next) {
       where.studentId = req.user.id;
     }
 
+    // TAs do not need student email addresses — omit to minimise exposure
+    // of personally identifiable information.
+    const isTA = req.user.primaryRole === 'teaching_assistant';
+    const studentAttrs = isTA
+      ? ['id', 'firstName', 'lastName', 'studentNumber']
+      : ['id', 'firstName', 'lastName', 'email', 'studentNumber'];
+
     const [courseProgress, lessonProgress] = await Promise.all([
       CourseProgress.findAll({
         where,
         include: [
-          { model: User, as: 'student', attributes: ['id', 'firstName', 'lastName', 'email', 'studentNumber'] }
+          { model: User, as: 'student', attributes: studentAttrs }
         ]
       }),
       LessonProgress.findAll({
