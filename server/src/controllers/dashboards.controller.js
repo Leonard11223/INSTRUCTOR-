@@ -27,6 +27,7 @@ const {
   AuditLog,
   SystemSetting
 } = require('../models');
+const { AppError } = require('../middleware/error.middleware');
 
 async function getDashboardSummary(req, res, next) {
   try {
@@ -638,5 +639,204 @@ async function getDashboardSummary(req, res, next) {
   }
 }
 
-module.exports = { getDashboardSummary };
+/* ═══════════════════════════════════════════════════════════════════════════
+   TA Student Monitoring — GET /dashboards/ta-student-monitoring/:classId
+   Aggregates per-student submission activity, assessment attempts, course
+   progress, and PUBLISHED-ONLY grades for a TA's assigned section.
+   TAs never see draft/unpublished grades — read-only monitoring.
+═══════════════════════════════════════════════════════════════════════════ */
+async function getTaStudentMonitoring(req, res, next) {
+  try {
+    const classId = Number(req.params.classId);
+    if (!classId || Number.isNaN(classId)) {
+      throw new AppError('Invalid class identifier.', 400, 'INVALID_CLASS_ID');
+    }
+
+    // Verify TA is assigned to this section (also allows admin/instructor)
+    const { verifyClassAccess } = require('../middleware/auth.middleware');
+    const access = await verifyClassAccess(req.user, classId, {
+      allowAdmin: true,
+      allowInstructor: true,
+      allowTA: true,
+    });
+
+    // Parallel fetch of all data needed
+    const [
+      classSection,
+      memberships,
+      assignments,
+      submissions,
+      assessments,
+      attempts,
+      courseProgressRecords,
+      publishedGrades,
+    ] = await Promise.all([
+      ClassSection.findByPk(classId, {
+        include: [{
+          model: CourseOffering,
+          as: 'courseOffering',
+          include: [{ model: Course, as: 'course', attributes: ['id', 'code', 'title'] }],
+        }],
+      }),
+      ClassMembership.findAll({
+        where: { classId, status: ['enrolled', 'completed'] },
+        include: [{
+          model: User,
+          as: 'student',
+          attributes: ['id', 'firstName', 'lastName', 'email', 'studentNumber'],
+        }],
+        order: [['id', 'ASC']],
+      }),
+      Assignment.findAll({
+        where: { classId, publicationStatus: 'published' },
+        attributes: ['id', 'title', 'dueDate', 'maxScore', 'assignmentType'],
+        order: [['dueDate', 'ASC']],
+      }),
+      Submission.findAll({
+        where: { classId },
+        attributes: [
+          'id', 'assignmentId', 'studentId', 'status', 'submittedAt',
+          'isLate', 'score', 'isGradePublished', 'flaggedForInstructorReview',
+        ],
+        order: [['submittedAt', 'DESC']],
+      }),
+      Assessment.findAll({
+        where: { classId, publicationStatus: ['published', 'closed'] },
+        attributes: ['id', 'title', 'maxScore', 'closeDate', 'assessmentType'],
+        order: [['closeDate', 'ASC']],
+      }),
+      AssessmentAttempt.findAll({
+        where: { classId },
+        attributes: [
+          'id', 'assessmentId', 'studentId', 'status', 'totalScore',
+          'isPublished', 'submittedAt', 'startedAt',
+        ],
+      }),
+      CourseProgress.findAll({
+        where: { classId },
+      }),
+      // TAs see ONLY published grades — never draft, never submitted_final
+      Grade.findAll({
+        where: {
+          classId,
+          status: ['published', 'approved_final'],
+        },
+        attributes: [
+          'id', 'studentId', 'sourceType', 'itemTitle',
+          'score', 'maxScore', 'status', 'publishedAt',
+        ],
+        order: [['publishedAt', 'DESC']],
+      }),
+    ]);
+
+    // Build per-student summary
+    const students = memberships.map((m) => {
+      const studentId = m.studentId;
+      const studentSubmissions = submissions.filter((s) => s.studentId === studentId);
+      const studentAttempts     = attempts.filter((a) => a.studentId === studentId);
+      const studentGrades       = publishedGrades.filter((g) => g.studentId === studentId);
+      const cp                  = courseProgressRecords.find((p) => p.studentId === studentId);
+
+      // Submission breakdown
+      const submittedCount = studentSubmissions.filter((s) =>
+        ['submitted', 'late', 'under_review', 'graded'].includes(s.status)
+      ).length;
+      const lateCount      = studentSubmissions.filter((s) => s.isLate || s.status === 'late').length;
+      const gradedCount    = studentSubmissions.filter((s) => s.status === 'graded').length;
+      const flaggedCount   = studentSubmissions.filter((s) => s.flaggedForInstructorReview).length;
+      const missingCount   = Math.max(0, assignments.length - submittedCount);
+
+      // Assessment breakdown
+      const completedAttempts = studentAttempts.filter((a) =>
+        ['submitted', 'graded'].includes(a.status)
+      );
+      const inProgressAttempts = studentAttempts.filter((a) => a.status === 'in_progress');
+      const publishedAttempts  = completedAttempts.filter((a) => a.isPublished);
+      const avgAssessmentScore  = publishedAttempts.length > 0
+        ? Number((publishedAttempts.reduce((acc, a) => acc + Number(a.totalScore || 0), 0) / publishedAttempts.length).toFixed(1))
+        : null;
+
+      // Published grade summary
+      const gradeItems = studentGrades.map((g) => ({
+        id: g.id,
+        itemTitle: g.itemTitle,
+        score: Number(g.score),
+        maxScore: Number(g.maxScore),
+        percentage: g.maxScore > 0 ? Number(((Number(g.score) / Number(g.maxScore)) * 100).toFixed(1)) : null,
+        sourceType: g.sourceType,
+        publishedAt: g.publishedAt,
+      }));
+
+      // Recent activity timestamps
+      const lastSubmissionDate = studentSubmissions
+        .filter((s) => s.submittedAt)
+        .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt))[0]?.submittedAt || null;
+      const lastAttemptDate = studentAttempts
+        .filter((a) => a.submittedAt)
+        .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt))[0]?.submittedAt || null;
+
+      return {
+        studentId,
+        studentName: m.student ? `${m.student.firstName} ${m.student.lastName}` : `Student #${studentId}`,
+        studentEmail: m.student?.email || '',
+        studentNumber: m.student?.studentNumber || null,
+        enrollmentStatus: m.status,
+        submissions: {
+          totalAssignments: assignments.length,
+          submitted: submittedCount,
+          late: lateCount,
+          missing: missingCount,
+          graded: gradedCount,
+          flagged: flaggedCount,
+        },
+        assessments: {
+          totalAssessments: assessments.length,
+          completed: completedAttempts.length,
+          inProgress: inProgressAttempts.length,
+          publishedResults: publishedAttempts.length,
+          averageScore: avgAssessmentScore,
+        },
+        grades: {
+          publishedCount: gradeItems.length,
+          items: gradeItems,
+        },
+        progress: cp ? {
+          percentage: Number(cp.progressPercentage || 0),
+          completedLessons: cp.completedLessonsCount || 0,
+          totalLessons: cp.totalLessonsCount || 0,
+        } : null,
+        lastActivity: {
+          submissionDate: lastSubmissionDate,
+          assessmentDate: lastAttemptDate,
+        },
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        classId,
+        classSection: {
+          id: classSection?.id,
+          sectionCode: classSection?.sectionCode,
+          name: classSection?.name,
+          courseCode: classSection?.courseOffering?.course?.code,
+          courseTitle: classSection?.courseOffering?.course?.title,
+        },
+        accessRole: access.accessRole,
+        assignments: assignments.map((a) => ({
+          id: a.id, title: a.title, dueDate: a.dueDate, maxScore: Number(a.maxScore), type: a.assignmentType,
+        })),
+        assessments: assessments.map((a) => ({
+          id: a.id, title: a.title, closeDate: a.closeDate, maxScore: Number(a.maxScore), type: a.assessmentType,
+        })),
+        students,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = { getDashboardSummary, getTaStudentMonitoring };
 

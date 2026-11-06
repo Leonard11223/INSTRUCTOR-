@@ -18,12 +18,14 @@ const {
   ClassMembership,
   InstructorAssignment,
   TeachingAssistantAssignment,
-  User
+  User,
+  AuditLog
 } = require('../models');
 const env = require('../config/env');
 const { AppError } = require('../middleware/error.middleware');
 const { verifyClassAccess } = require('../middleware/auth.middleware');
 const { verifyUploadedFileSafety } = require('../middleware/upload.middleware');
+const { sanitizePlainText } = require('../utils/sanitizer');
 const { upsertGradeWithHistory } = require('../services/gradebook.service');
 const { recalculateStudentCourseProgress } = require('../services/progress.service');
 const { createNotification } = require('../utils/notifyUser');
@@ -52,9 +54,21 @@ async function listAssignments(req, res, next) {
     } else if (req.user.primaryRole === 'instructor' && !classId) {
       const assigned = await InstructorAssignment.findAll({ where: { instructorId: req.user.id } });
       where.classId = assigned.map((a) => a.classId);
-    } else if (req.user.primaryRole === 'teaching_assistant' && !classId) {
+    } else if (req.user.primaryRole === 'teaching_assistant') {
       const assigned = await TeachingAssistantAssignment.findAll({ where: { taUserId: req.user.id } });
-      where.classId = assigned.map((a) => a.classId);
+      const allowedClassIds = assigned.map((a) => a.classId);
+      if (classId) {
+        // Explicit classId: verify it's in the TA's assignment list (IDOR guard)
+        if (!allowedClassIds.includes(Number(classId))) {
+          throw new AppError('Forbidden: You do not have access to assignments in this class section.', 403, 'CLASS_ACCESS_DENIED');
+        }
+      } else {
+        // No classId: scope to all assigned sections
+        if (allowedClassIds.length === 0) {
+          return res.status(200).json({ success: true, data: { assignments: [] } });
+        }
+        where.classId = allowedClassIds;
+      }
     }
 
     const assignments = await Assignment.findAll({
@@ -203,17 +217,44 @@ async function listSubmissions(req, res, next) {
     } else if (req.user.primaryRole === 'instructor' && !classId) {
       const assigned = await InstructorAssignment.findAll({ where: { instructorId: req.user.id } });
       where.classId = assigned.map((a) => a.classId);
-    } else if (req.user.primaryRole === 'teaching_assistant' && !classId) {
+    } else if (req.user.primaryRole === 'teaching_assistant') {
+      // Fetch all TA assignments — used for both explicit and implicit classId cases
       const assigned = await TeachingAssistantAssignment.findAll({ where: { taUserId: req.user.id } });
-      where.classId = assigned.map((a) => a.classId);
+
+      if (classId) {
+        // Explicit classId: verify the TA is assigned to this section (IDOR guard)
+        const match = assigned.find((a) => a.classId === Number(classId));
+        if (!match) {
+          throw new AppError('Forbidden: You do not have access to submissions in this class section.', 403, 'CLASS_ACCESS_DENIED');
+        }
+        // Also verify the per-class canReviewSubmissions flag
+        if (!match.canReviewSubmissions) {
+          throw new AppError('Your TA assignment does not permit reviewing submissions in this class section.', 403, 'TA_PERMISSION_DENIED');
+        }
+      } else {
+        // No classId: scope only to sections where canReviewSubmissions is enabled
+        const allowedClassIds = assigned
+          .filter((a) => a.canReviewSubmissions)
+          .map((a) => a.classId);
+        if (allowedClassIds.length === 0) {
+          return res.status(200).json({ success: true, data: { submissions: [] } });
+        }
+        where.classId = allowedClassIds;
+      }
     }
+
+    // TA responses exclude SubmissionVersion history (version history is not
+    // needed for TA preliminary review and reduces response payload size).
+    const isTA = req.user.primaryRole === 'teaching_assistant';
 
     const submissions = await Submission.findAll({
       where,
       include: [
-        { model: Assignment, as: 'assignment' },
+        { model: Assignment, as: 'assignment', include: [
+          { model: GradingRubric, as: 'rubric', include: [{ model: RubricCriterion, as: 'criteria' }] }
+        ]},
         { model: User, as: 'student', attributes: ['id', 'firstName', 'lastName', 'email', 'studentNumber'] },
-        { model: SubmissionVersion, as: 'versions' }
+        ...(isTA ? [] : [{ model: SubmissionVersion, as: 'versions' }])
       ],
       order: [['updatedAt', 'DESC']]
     });
@@ -326,6 +367,23 @@ async function submitAssignmentWork(req, res, next) {
 
     if (!isDraft) {
       await recalculateStudentCourseProgress(assignment.classId, req.user.id);
+
+      // Notify TAs assigned to this section that a new submission needs review.
+      // Only notifies when canReviewSubmissions is true for the TA's assignment.
+      // Does not include the submission content — just the assignment title and student
+      // count needed to prioritise their review queue.
+      const taAssignments = await TeachingAssistantAssignment.findAll({
+        where: { classId: assignment.classId, canReviewSubmissions: true }
+      });
+      for (const ta of taAssignments) {
+        await createNotification({
+          userId: ta.taUserId,
+          type: 'assignment',
+          title: `New Submission: ${assignment.title}`,
+          message: `A student has submitted work for "${assignment.title}". Open your review queue to provide preliminary feedback.`,
+          destinationUrl: '/ta/submissions'
+        });
+      }
     }
 
     return res.status(200).json({
@@ -350,6 +408,7 @@ async function reviewOrGradeSubmission(req, res, next) {
       rubricEvaluation,
       flaggedForInstructorReview,
       flagReason,
+      flagCategory,
       returnForRevision = false,
       reason = 'Instructor submission grading'
     } = req.body;
@@ -379,18 +438,200 @@ async function reviewOrGradeSubmission(req, res, next) {
         throw new AppError('Teaching Assistants are not permitted to publish final official grades.', 403, 'TA_PUBLISH_GRADE_FORBIDDEN');
       }
 
+      // ── Validate escalation: structured flag category + description ──────────
+      const ALLOWED_FLAG_CATEGORIES = [
+        'plagiarism',
+        'incomplete_submission',
+        'technical_issue',
+        'unusual_content',
+        'instructor_review_needed',
+      ];
+
+      const willFlag = flaggedForInstructorReview !== undefined
+        ? Boolean(flaggedForInstructorReview)
+        : submission.flaggedForInstructorReview;
+
+      // Build structured escalation data to store in flagReason
+      let escalationData = null;
+      if (willFlag) {
+        // Determine effective category
+        let effectiveCategory = flagCategory;
+        if (!effectiveCategory && submission.flagReason) {
+          // Try to parse existing structured flagReason for the category
+          try {
+            const parsed = JSON.parse(submission.flagReason);
+            if (parsed.category) effectiveCategory = parsed.category;
+          } catch (_) { /* old-format plain text */ }
+        }
+        if (!effectiveCategory || !ALLOWED_FLAG_CATEGORIES.includes(effectiveCategory)) {
+          throw new AppError(
+            `A valid flag category is required. Allowed: ${ALLOWED_FLAG_CATEGORIES.join(', ')}.`,
+            400,
+            'FLAG_CATEGORY_REQUIRED'
+          );
+        }
+
+        // Determine effective description
+        let effectiveDescription = flagReason;
+        if (flagReason === undefined && submission.flagReason) {
+          try {
+            const parsed = JSON.parse(submission.flagReason);
+            effectiveDescription = parsed.description || '';
+          } catch (_) {
+            effectiveDescription = submission.flagReason; // old-format plain text
+          }
+        }
+        if (!effectiveDescription || String(effectiveDescription).trim().length < 3) {
+          throw new AppError(
+            'A description (at least 3 characters) is required when escalating to the instructor.',
+            400,
+            'FLAG_REASON_REQUIRED'
+          );
+        }
+
+        // Build structured JSON for storage in flagReason field
+        escalationData = {
+          category: effectiveCategory,
+          description: sanitizePlainText(String(effectiveDescription).trim()),
+          flaggedBy: req.user.id,
+          flaggedByName: req.user.fullName,
+          flaggedAt: new Date().toISOString(),
+          status: 'pending_instructor_review',
+        };
+      }
+
+      const wasPreviouslyFlagged = submission.flaggedForInstructorReview;
+
+      // Validate rubric scores against the assignment's actual rubric criteria
+      // and stamp the evaluation with the TA reviewer's identity for the audit trail.
+      let validatedRubricEvaluation = rubricEvaluation;
+      if (rubricEvaluation && rubricEvaluation.criteria && Array.isArray(rubricEvaluation.criteria)) {
+        const rubric = await GradingRubric.findOne({
+          where: { assignmentId: submission.assignmentId },
+          include: [{ model: RubricCriterion, as: 'criteria' }]
+        });
+        if (rubric && rubric.criteria && rubric.criteria.length > 0) {
+          const criterionMap = new Map(rubric.criteria.map((c) => [c.id, c]));
+          let rubricTotal = 0;
+          let rubricMaxTotal = 0;
+          for (const entry of rubricEvaluation.criteria) {
+            const criterion = criterionMap.get(entry.criterionId);
+            if (!criterion) {
+              throw new AppError(
+                `Rubric criterion #${entry.criterionId} does not belong to this assignment.`,
+                400,
+                'INVALID_RUBRIC_CRITERION'
+              );
+            }
+            const scoreVal = Number(entry.score);
+            if (Number.isNaN(scoreVal) || scoreVal < 0 || scoreVal > Number(criterion.maxPoints)) {
+              throw new AppError(
+                `Score for "${criterion.criterionName}" must be between 0 and ${criterion.maxPoints}.`,
+                400,
+                'RUBRIC_SCORE_OUT_OF_RANGE'
+              );
+            }
+            rubricTotal += scoreVal;
+            rubricMaxTotal += Number(criterion.maxPoints);
+          }
+          // Stamp with reviewer identity for the audit trail
+          validatedRubricEvaluation = {
+            ...rubricEvaluation,
+            criteria: rubricEvaluation.criteria.map((entry) => ({
+              ...entry,
+              comment: entry.comment ? sanitizePlainText(String(entry.comment)) : '',
+            })),
+            reviewedBy: req.user.id,
+            reviewedByName: req.user.fullName,
+            reviewedAt: new Date().toISOString(),
+            rubricTotal: Number(rubricTotal.toFixed(2)),
+            rubricMaxTotal: Number(rubricMaxTotal.toFixed(2)),
+            rubricPercentage: rubricMaxTotal > 0
+              ? Number(((rubricTotal / rubricMaxTotal) * 100).toFixed(1))
+              : 0,
+          };
+        }
+      }
+
       await submission.update({
         status: 'under_review',
-        preliminaryFeedback: preliminaryFeedback !== undefined ? preliminaryFeedback : submission.preliminaryFeedback,
-        rubricEvaluation: rubricEvaluation !== undefined ? rubricEvaluation : submission.rubricEvaluation,
+        preliminaryFeedback: preliminaryFeedback !== undefined
+          ? sanitizePlainText(String(preliminaryFeedback))
+          : submission.preliminaryFeedback,
+        rubricEvaluation: validatedRubricEvaluation !== undefined ? validatedRubricEvaluation : submission.rubricEvaluation,
         flaggedForInstructorReview: flaggedForInstructorReview !== undefined ? Boolean(flaggedForInstructorReview) : submission.flaggedForInstructorReview,
-        flagReason: flagReason !== undefined ? flagReason : submission.flagReason
+        flagReason: willFlag
+          ? JSON.stringify(escalationData)
+          : (flaggedForInstructorReview === false ? null : submission.flagReason)
       }, { transaction: t });
 
       await t.commit();
+
+      // Audit log for TA review action
+      await recordAudit({
+        req,
+        action: willFlag ? 'SUBMISSION_FLAGGED_BY_TA' : 'SUBMISSION_TA_REVIEWED',
+        category: 'assessment',
+        entityType: 'Submission',
+        entityId: submission.id,
+        metadata: {
+          studentId: submission.studentId,
+          assignmentId: submission.assignmentId,
+          classId: submission.classId,
+          flagged: willFlag,
+          flagCategory: willFlag && escalationData ? escalationData.category : null,
+          flagDescription: willFlag && escalationData ? escalationData.description : null,
+          flaggedBy: willFlag ? req.user.id : null,
+          flaggedByName: willFlag ? req.user.fullName : null,
+          hasPreliminaryFeedback: Boolean(preliminaryFeedback),
+          hasRubricEvaluation: Boolean(rubricEvaluation),
+          rubricTotal: validatedRubricEvaluation && validatedRubricEvaluation.rubricTotal !== undefined
+            ? validatedRubricEvaluation.rubricTotal
+            : null,
+          rubricPercentage: validatedRubricEvaluation && validatedRubricEvaluation.rubricPercentage !== undefined
+            ? validatedRubricEvaluation.rubricPercentage
+            : null,
+        }
+      });
+
+      // Notify the instructor(s) when a submission is newly flagged for their review
+      if (willFlag && !wasPreviouslyFlagged) {
+        const FLAG_CATEGORY_LABELS = {
+          plagiarism: 'Possible Plagiarism / Academic Integrity',
+          incomplete_submission: 'Incomplete or Unclear Submission',
+          technical_issue: 'Technical Problem with Submitted Files',
+          unusual_content: 'Unusual Submission Content',
+          instructor_review_needed: 'Requires Instructor Review',
+        };
+        const categoryLabel = escalationData
+          ? (FLAG_CATEGORY_LABELS[escalationData.category] || escalationData.category)
+          : 'General';
+        const descriptionText = escalationData
+          ? escalationData.description
+          : (flagReason || submission.flagReason || 'No description provided.');
+
+        const instructors = await InstructorAssignment.findAll({
+          where: { classId: submission.classId },
+          include: [{ model: User, as: 'instructor', attributes: ['id', 'firstName', 'lastName'] }]
+        });
+        for (const ia of instructors) {
+          if (ia.instructor) {
+            await createNotification({
+              userId: ia.instructorId,
+              type: 'system',
+              title: `Submission Flagged by TA: ${submission.assignment.title}`,
+              message: `${req.user.fullName} flagged a submission from a student in ${access.classSection?.sectionCode || 'your class'} for your review.\n\nCategory: ${categoryLabel}\nDescription: ${descriptionText}\n\nThis is a request for instructor review — no penalty has been applied.`,
+              destinationUrl: '/instructor/submissions'
+            });
+          }
+        }
+      }
+
       return res.status(200).json({
         success: true,
-        message: 'TA preliminary review and flags recorded for instructor.',
+        message: willFlag
+          ? 'Submission flagged for instructor review. The instructor has been notified.'
+          : 'Preliminary review and feedback recorded for instructor.',
         data: { submission }
       });
     }
@@ -414,6 +655,23 @@ async function reviewOrGradeSubmission(req, res, next) {
         destinationUrl: '/student/assignments'
       });
 
+      // Notify TAs: if the submission was under_review (TA reviewed it),
+      // let them know the instructor returned it for revision.
+      if (submission.status === 'under_review') {
+        const taAssignments = await TeachingAssistantAssignment.findAll({
+          where: { classId: submission.classId, canReviewSubmissions: true }
+        });
+        for (const ta of taAssignments) {
+          await createNotification({
+            userId: ta.taUserId,
+            type: 'system',
+            title: `Submission Returned for Revision: ${submission.assignment.title}`,
+            message: `An instructor has returned the submission you reviewed for "${submission.assignment.title}" to the student for revision.`,
+            destinationUrl: '/ta/submissions'
+          });
+        }
+      }
+
       return res.status(200).json({
         success: true,
         message: 'Submission returned to student for revision.',
@@ -425,6 +683,10 @@ async function reviewOrGradeSubmission(req, res, next) {
     if (Number.isNaN(numericScore) || numericScore < 0 || numericScore > Number(submission.assignment.maxScore)) {
       throw new AppError(`Score must be between 0 and ${submission.assignment.maxScore}.`, 400);
     }
+
+    // Capture pre-grade status before the update so we can notify TAs
+    // who were involved in reviewing this submission
+    const preGradeStatus = submission.status;
 
     await submission.update({
       status: 'graded',
@@ -464,6 +726,26 @@ async function reviewOrGradeSubmission(req, res, next) {
       message: `You received ${numericScore} / ${submission.assignment.maxScore}.`,
       destinationUrl: '/student/grades'
     });
+
+    // Notify TAs assigned to this section that the submission they were
+    // monitoring has been graded by the instructor — but only when the
+    // submission was previously under_review (meaning a TA touched it).
+    // We do not expose the student's score to the TA to avoid leaking
+    // private grade information — only the assignment title and outcome.
+    if (preGradeStatus === 'under_review') {
+      const taAssignments = await TeachingAssistantAssignment.findAll({
+        where: { classId: submission.classId, canReviewSubmissions: true }
+      });
+      for (const ta of taAssignments) {
+        await createNotification({
+          userId: ta.taUserId,
+          type: 'system',
+          title: `Submission Graded by Instructor: ${submission.assignment.title}`,
+          message: `An instructor has officially graded the submission you reviewed for "${submission.assignment.title}". The official grade has been recorded.`,
+          destinationUrl: '/ta/submissions'
+        });
+      }
+    }
 
     await recordAudit({
       req,
@@ -1254,6 +1536,134 @@ async function extendAssignmentForStudent(req, res, next) {
   } catch (err) { return next(err); }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Escalation History — GET /submissions/:id/escalation-history
+   Returns the audit trail of flag/review actions for a submission.
+   Accessible by TAs (verified against their assigned sections), instructors,
+   and admins. This lets TAs view who flagged, when, and the reason category.
+═══════════════════════════════════════════════════════════════════════════ */
+async function getEscalationHistory(req, res, next) {
+  try {
+    const submissionId = Number(req.params.id);
+    if (!submissionId || Number.isNaN(submissionId)) {
+      throw new AppError('Invalid submission identifier.', 400, 'INVALID_SUBMISSION_ID');
+    }
+
+    const submission = await Submission.findByPk(submissionId, {
+      attributes: ['id', 'classId', 'assignmentId', 'studentId', 'flaggedForInstructorReview', 'flagReason'],
+    });
+    if (!submission) throw new AppError('Submission not found.', 404);
+
+    // Verify the caller has access to this submission's class section
+    await verifyClassAccess(req.user, submission.classId, {
+      allowAdmin: true,
+      allowInstructor: true,
+      allowTA: true,
+    });
+
+    // Query audit logs for this submission's flag/review/grade actions
+    const logs = await AuditLog.findAll({
+      where: {
+        entityType: 'Submission',
+        entityId: String(submissionId),
+        action: [
+          'SUBMISSION_FLAGGED_BY_TA',
+          'SUBMISSION_TA_REVIEWED',
+          'SUBMISSION_GRADED',
+        ],
+      },
+      include: [{
+        model: User,
+        as: 'actor',
+        attributes: ['id', 'firstName', 'lastName', 'email'],
+        required: false,
+      }],
+      order: [['createdAt', 'DESC']],
+      limit: 50,
+    });
+
+    // Parse structured flagReason from the submission if present
+    let currentEscalation = null;
+    if (submission.flagReason) {
+      try {
+        currentEscalation = JSON.parse(submission.flagReason);
+      } catch (_) {
+        // Old-format plain text — wrap it
+        currentEscalation = {
+          category: 'instructor_review_needed',
+          description: submission.flagReason,
+          status: 'pending_instructor_review',
+        };
+      }
+    }
+
+    const FLAG_CATEGORY_LABELS = {
+      plagiarism: 'Possible Plagiarism / Academic Integrity',
+      incomplete_submission: 'Incomplete or Unclear Submission',
+      technical_issue: 'Technical Problem with Submitted Files',
+      unusual_content: 'Unusual Submission Content',
+      instructor_review_needed: 'Requires Instructor Review',
+    };
+
+    // Build the history entries
+    const history = logs.map((log) => {
+      const meta = log.metadata || {};
+      let category = meta.flagCategory;
+      let description = meta.flagDescription;
+      // For older logs that used flagReason instead of flagCategory/flagDescription
+      if (!category && meta.flagReason) {
+        try {
+          const parsed = JSON.parse(meta.flagReason);
+          category = parsed.category;
+          description = parsed.description;
+        } catch (_) {
+          description = meta.flagReason;
+        }
+      }
+
+      return {
+        id: log.id,
+        action: log.action,
+        actionLabel: log.action === 'SUBMISSION_FLAGGED_BY_TA' ? 'Flagged for Instructor Review'
+                    : log.action === 'SUBMISSION_TA_REVIEWED' ? 'TA Preliminary Review'
+                    : log.action === 'SUBMISSION_GRADED' ? 'Officially Graded by Instructor'
+                    : log.action,
+        actorName: log.actor
+          ? `${log.actor.firstName} ${log.actor.lastName}`
+          : (meta.flaggedByName || meta.actorEmail || 'Unknown'),
+        actorEmail: log.actor?.email || null,
+        category: category || null,
+        categoryLabel: category ? (FLAG_CATEGORY_LABELS[category] || category) : null,
+        description: description || null,
+        flagged: meta.flagged || false,
+        hasRubric: Boolean(meta.hasRubricEvaluation),
+        rubricTotal: meta.rubricTotal ?? null,
+        rubricPercentage: meta.rubricPercentage ?? null,
+        timestamp: log.createdAt,
+        severity: log.severity,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        submissionId,
+        classId: submission.classId,
+        assignmentId: submission.assignmentId,
+        studentId: submission.studentId,
+        isCurrentlyFlagged: submission.flaggedForInstructorReview,
+        currentEscalation: currentEscalation ? {
+          ...currentEscalation,
+          categoryLabel: FLAG_CATEGORY_LABELS[currentEscalation.category] || currentEscalation.category,
+        } : null,
+        history,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   listAssignments,
   getAssignmentById,
@@ -1263,6 +1673,7 @@ module.exports = {
   listSubmissions,
   submitAssignmentWork,
   reviewOrGradeSubmission,
+  getEscalationHistory,
   listQuestionBanks,
   createQuestionBank,
   createQuestion,

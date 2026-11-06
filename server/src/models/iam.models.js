@@ -17,7 +17,7 @@ module.exports = (sequelize) => {
       defaultValue: 'active',
       allowNull: false
     },
-    avatarUrl: { type: DataTypes.STRING(500), allowNull: true, field: 'avatar_url' },
+    avatarUrl: { type: DataTypes.TEXT, allowNull: true, field: 'avatar_url' },
     bio: { type: DataTypes.TEXT, allowNull: true },
     phone: { type: DataTypes.STRING(40), allowNull: true },
     timezone: { type: DataTypes.STRING(80), defaultValue: 'Asia/Manila' },

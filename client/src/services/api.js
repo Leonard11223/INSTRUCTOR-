@@ -45,6 +45,7 @@ export const lmsApi = {
 
   // ── Dashboard ─────────────────────────────────────────────────────────────
   getDashboardSummary: () => apiClient.get('/dashboards/summary').then((r) => r.data),
+  getTaStudentMonitoring: (classId) => apiClient.get(`/dashboards/ta-student-monitoring/${classId}`).then((r) => r.data),
 
   // ── IAM & System ──────────────────────────────────────────────────────────
   listUsers: (params) => apiClient.get('/users', { params }).then((r) => r.data),
@@ -126,6 +127,7 @@ export const lmsApi = {
   submitAssignment: (assignmentId, data) =>
     apiClient.post(`/assignments/${assignmentId}/submit`, data).then((r) => r.data),
   reviewSubmission: (id, data) => apiClient.put(`/submissions/${id}/review`, data).then((r) => r.data),
+  getEscalationHistory: (id) => apiClient.get(`/submissions/${id}/escalation-history`).then((r) => r.data),
 
   // ── Question Banks & Questions ────────────────────────────────────────────
   listQuestionBanks: (params) => apiClient.get('/question-banks', { params }).then((r) => r.data),
@@ -177,6 +179,7 @@ export const lmsApi = {
     apiClient.put(`/discussions/${threadId}/status`, data).then((r) => r.data),
   deleteDiscussion: (threadId) => apiClient.delete(`/discussions/${threadId}`).then((r) => r.data),
   endorseDiscussionPost: (postId) => apiClient.put(`/discussions/posts/${postId}/endorse`).then((r) => r.data),
+  getDiscussionModerationHistory: (threadId) => apiClient.get(`/discussions/${threadId}/moderation-history`).then((r) => r.data),
 
   // ── Attendance ────────────────────────────────────────────────────────────
   listAttendanceSessions: (params) => apiClient.get('/attendance/sessions', { params }).then((r) => r.data),

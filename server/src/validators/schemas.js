@@ -31,7 +31,8 @@ const updateProfileSchema = z.object({
   bio: z.string().max(1500).optional().nullable(),
   phone: z.string().max(40).optional().nullable(),
   timezone: z.string().max(80).optional(),
-  notificationPreferences: z.record(z.boolean()).optional()
+  notificationPreferences: z.record(z.boolean()).optional(),
+  avatarUrl: z.string().max(500000).optional().nullable()
 });
 
 const createUserSchema = z.object({

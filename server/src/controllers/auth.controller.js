@@ -274,8 +274,9 @@ async function updateProfile(req, res, next) {
       phone: payload.phone !== undefined ? payload.phone : user.phone,
       timezone: payload.timezone ?? user.timezone,
       notificationPreferences: payload.notificationPreferences
-        ? { ...user.notificationPreferences, ...payload.notificationPreferences }
-        : user.notificationPreferences
+        ? { ...(typeof user.notificationPreferences === 'string' ? JSON.parse(user.notificationPreferences) : (user.notificationPreferences || {})), ...payload.notificationPreferences }
+        : user.notificationPreferences,
+      avatarUrl: payload.avatarUrl !== undefined ? payload.avatarUrl : user.avatarUrl
     });
 
     await recordAudit({

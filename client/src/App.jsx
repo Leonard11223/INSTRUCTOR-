@@ -60,6 +60,9 @@ import {
 
 import {
   TaDashboardPage,
+  TaClassRosterPage,
+  TaStudentProgressPage,
+  TaStudentActivityPage,
   TaSubmissionsReviewPage,
   SharedAnnouncementsPage,
   SharedDiscussionsPage,
@@ -334,7 +337,23 @@ export default function App() {
           path="/ta/classes"
           element={
             <ProtectedRoute allowedRoles={['teaching_assistant']}>
-              <TaDashboardPage />
+              <TaClassRosterPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ta/progress"
+          element={
+            <ProtectedRoute allowedRoles={['teaching_assistant']}>
+              <TaStudentProgressPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ta/activity"
+          element={
+            <ProtectedRoute allowedRoles={['teaching_assistant']}>
+              <TaStudentActivityPage />
             </ProtectedRoute>
           }
         />
@@ -347,18 +366,18 @@ export default function App() {
           }
         />
         <Route
-          path="/ta/resources"
-          element={
-            <ProtectedRoute allowedRoles={['teaching_assistant']}>
-              <InstructorCourseStudioPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
           path="/ta/discussions"
           element={
             <ProtectedRoute allowedRoles={['teaching_assistant']}>
               <SharedDiscussionsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ta/announcements"
+          element={
+            <ProtectedRoute allowedRoles={['teaching_assistant']}>
+              <SharedAnnouncementsPage />
             </ProtectedRoute>
           }
         />
