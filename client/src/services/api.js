@@ -64,6 +64,7 @@ export const lmsApi = {
   // ── Academic Management ───────────────────────────────────────────────────
   getPublicCatalog: () => apiClient.get('/public/catalog').then((r) => r.data),
   getInstitution: () => apiClient.get('/institutions').then((r) => r.data),
+  getMyPlacements: () => apiClient.get('/student/placements').then((r) => r.data),
   updateInstitution: (data) => apiClient.put('/institutions', data).then((r) => r.data),
   listDepartments: () => apiClient.get('/departments').then((r) => r.data),
   createDepartment: (data) => apiClient.post('/departments', data).then((r) => r.data),
@@ -216,6 +217,7 @@ export const lmsApi = {
   attachFileToLesson: (lessonId, formData) =>
     apiClient.post(`/lessons/${lessonId}/attach-file`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data),
   listMessages: () => apiClient.get('/messages').then((r) => r.data),
+  listMessageRecipients: () => apiClient.get('/messages/recipients').then((r) => r.data),
   sendMessage: (data) => apiClient.post('/messages', data).then((r) => r.data),
   listNotifications: () => apiClient.get('/notifications').then((r) => r.data),
   markNotificationRead: (id) => apiClient.put(`/notifications/${id}/read`).then((r) => r.data)

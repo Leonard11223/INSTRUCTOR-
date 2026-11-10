@@ -614,9 +614,9 @@ export function SharedMessagesPage() {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
 
-  const { data: usersData } = useQuery({
+  const { data: usersData, isLoading: isLoadingRecipients, error: recipientsError, refetch: refetchRecipients } = useQuery({
     queryKey: ['users-messaging'],
-    queryFn: () => lmsApi.listUsers({ status: 'active' }).catch(() => ({ data: { users: [] } }))
+    queryFn: lmsApi.listMessageRecipients
   });
 
   const { data, isLoading } = useQuery({
@@ -687,6 +687,7 @@ export function SharedMessagesPage() {
             <label className="block font-semibold mb-1">Recipient</label>
             <select
               required
+              disabled={isLoadingRecipients || Boolean(recipientsError)}
               value={recipientId}
               onChange={(e) => setRecipientId(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
@@ -698,6 +699,14 @@ export function SharedMessagesPage() {
                 </option>
               ))}
             </select>
+            {recipientsError && (
+              <div className="mt-2 text-rose-700" role="alert">
+                <p>Unable to load message recipients: {extractErrorMessage(recipientsError)}</p>
+                <button type="button" className="mt-1 font-semibold underline" onClick={() => refetchRecipients()}>
+                  Retry
+                </button>
+              </div>
+            )}
           </div>
           <div>
             <label className="block font-semibold mb-1">Subject</label>

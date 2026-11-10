@@ -213,6 +213,7 @@ router.get('/discussions/:threadId/moderation-history', requireAuth, commCtrl.ge
 router.put('/discussions/posts/:postId/endorse', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), commCtrl.endorseDiscussionPost);
 
 router.get('/messages', requireAuth, commCtrl.listConversations);
+router.get('/messages/recipients', requireAuth, requirePermission('messages:use'), commCtrl.listMessageRecipients);
 router.post('/messages', requireAuth, commCtrl.startOrSendMessage);
 
 router.get('/notifications', requireAuth, commCtrl.listNotifications);

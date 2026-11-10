@@ -136,6 +136,27 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       expect(placementsRes.body.data.placements).toHaveLength(1);
       expect(placementsRes.body.data.placements[0].studentId).toBe(meRes.body.data.user.id);
     });
+
+    it('lists minimal active messaging recipients for authorized users only', async () => {
+      const meRes = await studentAgent.get('/api/auth/me');
+      const recipientsRes = await studentAgent.get('/api/messages/recipients');
+
+      expect(recipientsRes.status).toBe(200);
+      expect(recipientsRes.body.data.users.length).toBeGreaterThan(0);
+      expect(recipientsRes.body.data.users.some((user) => user.id === meRes.body.data.user.id)).toBe(false);
+      expect(recipientsRes.body.data.users[0]).toEqual(expect.objectContaining({
+        id: expect.any(Number),
+        firstName: expect.any(String),
+        lastName: expect.any(String),
+        primaryRole: expect.any(String)
+      }));
+      expect(recipientsRes.body.data.users[0]).not.toHaveProperty('email');
+      expect(recipientsRes.body.data.users[0]).not.toHaveProperty('passwordHash');
+
+      expect((await instructorAgent.get('/api/messages/recipients')).status).toBe(200);
+      expect((await taAgent.get('/api/messages/recipients')).status).toBe(200);
+      expect((await anonAgent.get('/api/messages/recipients')).status).toBe(401);
+    });
   });
 
   describe('2. Server-Side RBAC & Privilege Escalation Protection', () => {
