@@ -11,6 +11,8 @@ const {
   QuestionBank,
   Question,
   QuestionOption,
+  QuestionSet,
+  QuestionSetQuestion,
   Assessment,
   AssessmentQuestion,
   AssessmentAttempt,
@@ -30,7 +32,7 @@ const { upsertGradeWithHistory } = require('../services/gradebook.service');
 const { recalculateStudentCourseProgress } = require('../services/progress.service');
 const { createNotification } = require('../utils/notifyUser');
 const { recordAudit } = require('../utils/auditLogger');
-const { assignmentSchema, questionSchema, assessmentSchema } = require('../validators/schemas');
+const { assignmentSchema, questionSchema, questionSetSchema, assessmentSchema } = require('../validators/schemas');
 
 // ============================================================================
 // ASSIGNMENTS & SUBMISSIONS
@@ -797,6 +799,114 @@ async function listQuestionBanks(req, res, next) {
   }
 }
 
+async function listQuestionSets(req, res, next) {
+  try {
+    const where = {};
+    if (req.query.courseId) where.courseId = Number(req.query.courseId);
+
+    const questionSets = await QuestionSet.findAll({
+      where,
+      include: [{
+        model: Question,
+        as: 'questions',
+        through: { attributes: ['orderIndex'] },
+        where: { isArchived: false },
+        required: false,
+        include: [{ model: QuestionOption, as: 'options' }]
+      }, {
+        model: QuestionBank,
+        as: 'questionBank',
+        attributes: ['id', 'title']
+      }],
+      order: [['id', 'DESC']]
+    });
+
+    return res.status(200).json({ success: true, data: { questionSets } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function createQuestionSet(req, res, next) {
+  const t = await sequelize.transaction();
+  try {
+    const payload = questionSetSchema.parse(req.body);
+    const bank = await QuestionBank.findOne({
+      where: {
+        id: payload.questionBankId,
+        courseId: payload.courseId,
+        isArchived: false
+      },
+      transaction: t
+    });
+    if (!bank) throw new AppError('Select a question bank for the chosen course.', 400);
+
+    const questionSet = await QuestionSet.create({
+      courseId: payload.courseId,
+      questionBankId: payload.questionBankId,
+      title: payload.title,
+      description: payload.description || null,
+      createdBy: req.user.id
+    }, { transaction: t });
+
+    const questionIds = [];
+    for (const [index, questionPayload] of payload.questions.entries()) {
+      const question = await Question.create({
+        ...questionPayload,
+        questionBankId: bank.id,
+        courseId: bank.courseId
+      }, { transaction: t });
+      questionIds.push(question.id);
+
+      if (questionPayload.options?.length) {
+        await QuestionOption.bulkCreate(
+          questionPayload.options.map((option, optionIndex) => ({
+            questionId: question.id,
+            optionText: option.optionText,
+            isCorrect: option.isCorrect,
+            orderIndex: optionIndex + 1
+          })),
+          { transaction: t }
+        );
+      }
+
+      await QuestionSetQuestion.create({
+        questionSetId: questionSet.id,
+        questionId: question.id,
+        orderIndex: index + 1
+      }, { transaction: t });
+    }
+
+    await t.commit();
+    await recordAudit({
+      req,
+      action: 'QUESTION_SET_CREATED',
+      category: 'assessment',
+      entityType: 'QuestionSet',
+      entityId: questionSet.id,
+      metadata: { questionBankId: bank.id, courseId: bank.courseId, questionCount: questionIds.length }
+    });
+
+    const createdQuestionSet = await QuestionSet.findByPk(questionSet.id, {
+      include: [{
+        model: Question,
+        as: 'questions',
+        through: { attributes: ['orderIndex'] },
+        include: [{ model: QuestionOption, as: 'options' }]
+      }]
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Question set saved.',
+      data: { questionSet: createdQuestionSet }
+    });
+  } catch (err) {
+    if (!t.finished) await t.rollback();
+    return next(err);
+  }
+}
+
 async function createQuestionBank(req, res, next) {
   try {
     const { courseId, title, topic, description } = req.body;
@@ -913,19 +1023,36 @@ async function createAssessment(req, res, next) {
     const payload = assessmentSchema.parse(req.body);
     await verifyClassAccess(req.user, payload.classId, { allowAdmin: true, allowInstructor: true });
 
+    const questionIds = [...new Set(payload.questionIds)];
+    if (payload.publicationStatus === 'published' && questionIds.length === 0) {
+      throw new AppError('Add at least one question before publishing this assessment.', 400);
+    }
+
+    if (questionIds.length > 0) {
+      const questions = await Question.findAll({
+        where: { id: questionIds, courseId: payload.courseId, isArchived: false },
+        attributes: ['id'],
+        transaction: t
+      });
+      if (questions.length !== questionIds.length) {
+        throw new AppError('One or more selected questions are unavailable for this course.', 400);
+      }
+    }
+
     const assessment = await Assessment.create({
       ...payload,
       createdBy: req.user.id
     }, { transaction: t });
 
-    if (Array.isArray(payload.questionIds) && payload.questionIds.length > 0) {
-      for (let i = 0; i < payload.questionIds.length; i += 1) {
-        await AssessmentQuestion.create({
+    if (questionIds.length > 0) {
+      await AssessmentQuestion.bulkCreate(
+        questionIds.map((questionId, index) => ({
           assessmentId: assessment.id,
-          questionId: Number(payload.questionIds[i]),
-          orderIndex: i + 1
-        }, { transaction: t });
-      }
+          questionId,
+          orderIndex: index + 1
+        })),
+        { transaction: t }
+      );
     }
 
     await t.commit();
@@ -1426,8 +1553,9 @@ async function deleteAssignment(req, res, next) {
 // ============================================================================
 
 async function updateAssessment(req, res, next) {
+  const t = await sequelize.transaction();
   try {
-    const assessment = await Assessment.findByPk(Number(req.params.id));
+    const assessment = await Assessment.findByPk(Number(req.params.id), { transaction: t });
     if (!assessment) throw new AppError('Assessment not found.', 404);
     await verifyClassAccess(req.user, assessment.classId, { allowAdmin: true, allowInstructor: true });
 
@@ -1439,13 +1567,71 @@ async function updateAssessment(req, res, next) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
 
-    await assessment.update(updates);
+    let questionIdsToAdd = [];
+    if (req.body.questionIds !== undefined) {
+      if (!Array.isArray(req.body.questionIds) ||
+        req.body.questionIds.some((id) => !Number.isInteger(id) || id < 1)) {
+        throw new AppError('questionIds must be an array of positive integers.', 400);
+      }
 
-    await recordAudit({ req, action: 'ASSESSMENT_UPDATED', category: 'assessment',
-      entityType: 'Assessment', entityId: assessment.id, metadata: updates });
+      const requestedQuestionIds = [...new Set(req.body.questionIds)];
+      const questions = await Question.findAll({
+        where: {
+          id: requestedQuestionIds,
+          courseId: assessment.courseId,
+          isArchived: false
+        },
+        attributes: ['id'],
+        transaction: t
+      });
+      if (questions.length !== requestedQuestionIds.length) {
+        throw new AppError('One or more selected questions are unavailable for this course.', 400);
+      }
 
+      const existingLinks = await AssessmentQuestion.findAll({
+        where: { assessmentId: assessment.id },
+        attributes: ['questionId', 'orderIndex'],
+        transaction: t
+      });
+      const existingQuestionIds = new Set(existingLinks.map((link) => link.questionId));
+      questionIdsToAdd = requestedQuestionIds.filter((id) => !existingQuestionIds.has(id));
+
+      if (questionIdsToAdd.length > 0) {
+        const nextOrderIndex = Math.max(0, ...existingLinks.map((link) => link.orderIndex)) + 1;
+        await AssessmentQuestion.bulkCreate(
+          questionIdsToAdd.map((questionId, index) => ({
+            assessmentId: assessment.id,
+            questionId,
+            orderIndex: nextOrderIndex + index
+          })),
+          { transaction: t }
+        );
+      }
+    }
+
+    if (updates.publicationStatus === 'published' && assessment.publicationStatus !== 'published') {
+      const questionCount = await AssessmentQuestion.count({
+        where: { assessmentId: assessment.id },
+        transaction: t
+      });
+      if (questionCount === 0) {
+        throw new AppError('Add at least one question before publishing this assessment.', 400);
+      }
+    }
+
+    await assessment.update(updates, { transaction: t });
+    await recordAudit({
+      req,
+      action: 'ASSESSMENT_UPDATED',
+      category: 'assessment',
+      entityType: 'Assessment',
+      entityId: assessment.id,
+      metadata: { ...updates, ...(questionIdsToAdd.length ? { questionIdsAdded: questionIdsToAdd } : {}) }
+    });
+    await t.commit();
     return res.status(200).json({ success: true, message: 'Assessment updated.', data: { assessment } });
   } catch (err) {
+    if (!t.finished) await t.rollback();
     return next(err);
   }
 }
@@ -1675,6 +1861,8 @@ module.exports = {
   reviewOrGradeSubmission,
   getEscalationHistory,
   listQuestionBanks,
+  listQuestionSets,
+  createQuestionSet,
   createQuestionBank,
   createQuestion,
   updateQuestion,
@@ -1689,4 +1877,3 @@ module.exports = {
   manualGradeAttempt,
   extendAssignmentForStudent
 };
-

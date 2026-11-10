@@ -132,6 +132,8 @@ export const lmsApi = {
   // ── Question Banks & Questions ────────────────────────────────────────────
   listQuestionBanks: (params) => apiClient.get('/question-banks', { params }).then((r) => r.data),
   createQuestionBank: (data) => apiClient.post('/question-banks', data).then((r) => r.data),
+  listQuestionSets: (params) => apiClient.get('/question-sets', { params }).then((r) => r.data),
+  createQuestionSet: (data) => apiClient.post('/question-sets', data).then((r) => r.data),
   createQuestion: (data) => apiClient.post('/questions', data).then((r) => r.data),
   updateQuestion: (id, data) => apiClient.put(`/questions/${id}`, data).then((r) => r.data),
   deleteQuestion: (id) => apiClient.delete(`/questions/${id}`).then((r) => r.data),

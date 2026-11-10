@@ -301,6 +301,14 @@ const questionSchema = z.object({
   })).optional()
 });
 
+const questionSetSchema = z.object({
+  courseId: z.coerce.number().int().positive(),
+  questionBankId: z.coerce.number().int().positive(),
+  title: z.string().trim().min(2).max(200),
+  description: z.string().trim().max(2000).optional().nullable(),
+  questions: z.array(questionSchema.omit({ questionBankId: true, courseId: true })).min(1)
+});
+
 const assessmentSchema = z.object({
   classId: z.coerce.number().int().positive(),
   courseId: z.coerce.number().int().positive(),
@@ -409,6 +417,7 @@ module.exports = {
   lessonSchema,
   assignmentSchema,
   questionSchema,
+  questionSetSchema,
   assessmentSchema,
   gradeCategoriesBulkSchema,
   createAnnouncementSchema,
@@ -421,4 +430,3 @@ module.exports = {
   updateCourseOfferingSchema,
   updateClassSectionSchema
 };
-

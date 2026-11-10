@@ -56,6 +56,8 @@ const {
   QuestionBank,
   Question,
   QuestionOption,
+  QuestionSet,
+  QuestionSetQuestion,
   Assessment,
   AssessmentQuestion,
   AssessmentAttempt,
@@ -190,11 +192,27 @@ SubmissionVersion.belongsTo(Submission, { foreignKey: 'submissionId', as: 'submi
 
 Course.hasMany(QuestionBank, { foreignKey: 'courseId', as: 'questionBanks' });
 QuestionBank.belongsTo(Course, { foreignKey: 'courseId', as: 'course' });
+Course.hasMany(QuestionSet, { foreignKey: 'courseId', as: 'questionSets' });
+QuestionSet.belongsTo(Course, { foreignKey: 'courseId', as: 'course' });
+QuestionBank.hasMany(QuestionSet, { foreignKey: 'questionBankId', as: 'questionSets' });
+QuestionSet.belongsTo(QuestionBank, { foreignKey: 'questionBankId', as: 'questionBank' });
 QuestionBank.hasMany(Question, { foreignKey: 'questionBankId', as: 'questions' });
 Question.belongsTo(QuestionBank, { foreignKey: 'questionBankId', as: 'questionBank' });
 Question.belongsTo(Course, { foreignKey: 'courseId', as: 'course' });
 Question.hasMany(QuestionOption, { foreignKey: 'questionId', as: 'options' });
 QuestionOption.belongsTo(Question, { foreignKey: 'questionId', as: 'question' });
+QuestionSet.belongsToMany(Question, {
+  through: QuestionSetQuestion,
+  foreignKey: 'questionSetId',
+  otherKey: 'questionId',
+  as: 'questions'
+});
+Question.belongsToMany(QuestionSet, {
+  through: QuestionSetQuestion,
+  foreignKey: 'questionId',
+  otherKey: 'questionSetId',
+  as: 'questionSets'
+});
 
 ClassSection.hasMany(Assessment, { foreignKey: 'classId', as: 'assessments' });
 Assessment.belongsTo(ClassSection, { foreignKey: 'classId', as: 'classSection' });

@@ -180,6 +180,28 @@ module.exports = (sequelize) => {
     indexes: [{ fields: ['question_id'] }]
   });
 
+  const QuestionSet = sequelize.define('QuestionSet', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    courseId: { type: DataTypes.INTEGER, allowNull: false, field: 'course_id' },
+    questionBankId: { type: DataTypes.INTEGER, allowNull: false, field: 'question_bank_id' },
+    title: { type: DataTypes.STRING(200), allowNull: false },
+    description: { type: DataTypes.TEXT, allowNull: true },
+    createdBy: { type: DataTypes.INTEGER, allowNull: true, field: 'created_by' }
+  }, {
+    tableName: 'question_sets',
+    indexes: [{ fields: ['course_id'] }, { fields: ['question_bank_id'] }]
+  });
+
+  const QuestionSetQuestion = sequelize.define('QuestionSetQuestion', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    questionSetId: { type: DataTypes.INTEGER, allowNull: false, field: 'question_set_id' },
+    questionId: { type: DataTypes.INTEGER, allowNull: false, field: 'question_id' },
+    orderIndex: { type: DataTypes.INTEGER, allowNull: false, field: 'order_index' }
+  }, {
+    tableName: 'question_set_questions',
+    indexes: [{ fields: ['question_set_id', 'question_id'], unique: true }]
+  });
+
   const Assessment = sequelize.define('Assessment', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     classId: { type: DataTypes.INTEGER, allowNull: false, field: 'class_id' },
@@ -281,10 +303,11 @@ module.exports = (sequelize) => {
     QuestionBank,
     Question,
     QuestionOption,
+    QuestionSet,
+    QuestionSetQuestion,
     Assessment,
     AssessmentQuestion,
     AssessmentAttempt,
     AssessmentAnswer
   };
 };
-

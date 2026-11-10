@@ -166,6 +166,8 @@ router.get('/submissions/:id/escalation-history', requireAuth, assessCtrl.getEsc
 
 router.get('/question-banks', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), assessCtrl.listQuestionBanks);
 router.post('/question-banks', requireAuth, requirePermission('questions:manage'), assessCtrl.createQuestionBank);
+router.get('/question-sets', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), assessCtrl.listQuestionSets);
+router.post('/question-sets', requireAuth, requirePermission('questions:manage'), assessCtrl.createQuestionSet);
 router.post('/questions', requireAuth, requirePermission('questions:manage'), assessCtrl.createQuestion);
 router.put('/questions/:id', requireAuth, requirePermission('questions:manage'), assessCtrl.updateQuestion);
 router.delete('/questions/:id', requireAuth, requirePermission('questions:manage'), assessCtrl.deleteQuestion);
@@ -241,4 +243,3 @@ router.post('/enrollments/:membershipId/reject', requireAuth, requireRole('super
 router.post('/join-class', requireAuth, requireRole('student'), joinCodeCtrl.joinClassByCode);
 
 module.exports = router;
-

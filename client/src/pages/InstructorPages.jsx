@@ -221,7 +221,11 @@ export function InstructorCourseStudioPage() {
   const [aiFile, setAiFile] = useState(null);
   const [aiTopic, setAiTopic] = useState('');
   const [aiCount, setAiCount] = useState(10);
+  const [aiCourseId, setAiCourseId] = useState('');
+  const [aiBankId, setAiBankId] = useState('');
+  const [aiQuestionSetTitle, setAiQuestionSetTitle] = useState('');
   const [aiResults, setAiResults] = useState([]);
+  const [aiSelectedIndices, setAiSelectedIndices] = useState([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSaving, setAiSaving] = useState(false);
   const [joinCodeData, setJoinCodeData] = useState(null);
@@ -301,6 +305,9 @@ export function InstructorCourseStudioPage() {
       fd.append('topic', aiTopic);
       const res = await lmsApi.generateQuestionsFromFile(fd);
       setAiResults(res.data.questions);
+      setAiSelectedIndices(res.data.questions.map((_, index) => index));
+      const sourceName = aiFile.name.replace(/\.[^.]+$/, '');
+      setAiQuestionSetTitle(`${aiTopic.trim() || sourceName} Question Set`.slice(0, 200));
       addToast(res.data.questions.length + ' questions generated (' + res.data.method + ').');
     } catch (err) {
       addToast(extractErrorMessage(err), 'error');
@@ -308,24 +315,42 @@ export function InstructorCourseStudioPage() {
     setAiLoading(false);
   };
 
-  const handleSaveAiQuestions = async (bankId, courseId) => {
-    if (!bankId || !courseId) { addToast('Select a question bank and course first.', 'error'); return; }
+  const handleSaveAiQuestionSet = async () => {
+    if (!aiBankId || !aiCourseId) { addToast('Select a course and question bank first.', 'error'); return; }
+    if (!aiQuestionSetTitle.trim()) { addToast('Enter a name for this question set.', 'error'); return; }
+    const selectedQuestions = aiResults.filter((_, index) => aiSelectedIndices.includes(index));
+    if (selectedQuestions.length === 0) { addToast('Select at least one question to save.', 'error'); return; }
     setAiSaving(true);
-    let saved = 0;
-    for (const q of aiResults) {
-      try {
-        await lmsApi.createQuestion({ ...q, questionBankId: Number(bankId), courseId: Number(courseId) });
-        saved++;
-      } catch (_) {
-        // skip
-      }
+    try {
+      await lmsApi.createQuestionSet({
+        courseId: Number(aiCourseId),
+        questionBankId: Number(aiBankId),
+        title: aiQuestionSetTitle.trim(),
+        description: aiTopic.trim() || null,
+        questions: selectedQuestions.map((question) => ({
+          topic: question.topic || aiTopic.trim() || 'General',
+          questionType: question.questionType,
+          difficulty: question.difficulty,
+          prompt: question.prompt,
+          points: question.points,
+          explanation: question.explanation,
+          options: question.options
+        }))
+      });
+      addToast(`${selectedQuestions.length} questions saved as "${aiQuestionSetTitle.trim()}".`);
+      queryClient.invalidateQueries({ queryKey: ['question-banks'] });
+      queryClient.invalidateQueries({ queryKey: ['question-sets'] });
+      setAiOpen(false);
+      setAiResults([]);
+      setAiSelectedIndices([]);
+      setAiFile(null);
+      setAiQuestionSetTitle('');
+      setAiBankId('');
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    } finally {
+      setAiSaving(false);
     }
-    addToast(saved + ' questions saved to question bank.');
-    setAiSaving(false);
-    setAiOpen(false);
-    setAiResults([]);
-    setAiFile(null);
-    queryClient.invalidateQueries({ queryKey: ['question-banks'] });
   };
 
   const handleSaveMod = async (e) => {
@@ -464,7 +489,7 @@ export function InstructorCourseStudioPage() {
           <button type="button" onClick={() => setCourseOpen(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" /> Add Course
           </button>
-          <button type="button" onClick={() => setAiOpen(true)} className="px-3.5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
+          <button type="button" onClick={() => { setAiCourseId(selId || ''); setAiOpen(true); }} className="px-3.5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
             🤖 AI Quiz
           </button>
         </div>
@@ -979,7 +1004,7 @@ export function InstructorCourseStudioPage() {
       </ModalDialog>
 
       {/* AI Quiz Modal */}
-      <ModalDialog isOpen={aiOpen} onClose={() => { setAiOpen(false); setAiResults([]); setAiFile(null); }} title="🤖 AI Quiz Generator" maxWidth="max-w-2xl">
+      <ModalDialog isOpen={aiOpen} onClose={() => setAiOpen(false)} title="🤖 AI Quiz Generator" maxWidth="max-w-2xl">
         <div className="space-y-5 text-xs">
           {aiResults.length === 0 ? (
             <form onSubmit={handleAiGenerate} className="space-y-4">
@@ -1022,36 +1047,49 @@ export function InstructorCourseStudioPage() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="font-bold text-slate-900">✅ {aiResults.length} questions generated!</p>
-                <button type="button" onClick={() => setAiResults([])} className="text-xs text-slate-500 hover:underline">← Start over</button>
+                <button type="button" disabled={aiSaving} onClick={() => { setAiResults([]); setAiSelectedIndices([]); setAiFile(null); }} className="text-xs text-slate-500 hover:underline disabled:opacity-50">← Start over</button>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-violet-50 px-3 py-2 text-violet-900">
+                <span>{aiSelectedIndices.length} of {aiResults.length} questions selected for this set</span>
+                <button type="button" onClick={() => setAiSelectedIndices(aiSelectedIndices.length === aiResults.length ? [] : aiResults.map((_, index) => index))} className="font-semibold hover:underline">
+                  {aiSelectedIndices.length === aiResults.length ? 'Deselect all' : 'Select all'}
+                </button>
               </div>
               <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
                 {aiResults.map((q, i) => (
-                  <div key={i} className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-mono text-[10px] font-bold text-violet-600 uppercase">Q{i + 1}</span>
-                      <span className={'text-[10px] px-1.5 py-0.5 rounded font-semibold border ' + (q.difficulty === 'Hard' ? 'bg-rose-50 text-rose-700 border-rose-200' : q.difficulty === 'Easy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200')}>
-                        {q.difficulty}
-                      </span>
+                  <label key={i} className="flex gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200 cursor-pointer">
+                    <input type="checkbox" checked={aiSelectedIndices.includes(i)} onChange={() => setAiSelectedIndices((selected) => selected.includes(i) ? selected.filter((index) => index !== i) : [...selected, i])} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-mono text-[10px] font-bold text-violet-600 uppercase">Q{i + 1}</span>
+                        <span className={'text-[10px] px-1.5 py-0.5 rounded font-semibold border ' + (q.difficulty === 'Hard' ? 'bg-rose-50 text-rose-700 border-rose-200' : q.difficulty === 'Easy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200')}>
+                          {q.difficulty}
+                        </span>
+                      </div>
+                      <p className="font-semibold text-slate-900">{q.prompt}</p>
+                      <div className="mt-1.5 grid grid-cols-2 gap-1">
+                        {(q.options || []).map((o, oi) => (
+                          <p key={oi} className={'text-[11px] px-2 py-0.5 rounded ' + (o.isCorrect ? 'bg-emerald-100 text-emerald-800 font-semibold' : 'text-slate-500')}>
+                            {o.isCorrect ? '✓ ' : ''}{o.optionText}
+                          </p>
+                        ))}
+                      </div>
                     </div>
-                    <p className="font-semibold text-slate-900">{q.prompt}</p>
-                    <div className="mt-1.5 grid grid-cols-2 gap-1">
-                      {(q.options || []).map((o, oi) => (
-                        <p key={oi} className={'text-[11px] px-2 py-0.5 rounded ' + (o.isCorrect ? 'bg-emerald-100 text-emerald-800 font-semibold' : 'text-slate-500')}>
-                          {o.isCorrect ? '✓ ' : ''}{o.optionText}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
+                  </label>
                 ))}
               </div>
               <div className="pt-3 border-t border-slate-200 space-y-3">
-                <p className="font-semibold text-slate-700">Save to Question Bank:</p>
+                <p className="font-semibold text-slate-700">Save selected questions as a named set:</p>
+                <div>
+                  <label className="block text-[11px] font-semibold mb-1 text-slate-600">Set name</label>
+                  <input value={aiQuestionSetTitle} onChange={e=>setAiQuestionSetTitle(e.target.value)} maxLength={200} required placeholder="e.g., OSPF Review — Chapter 4" className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs"/>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[11px] font-semibold mb-1 text-slate-600">Question Bank</label>
-                    <select id="ai-bank-id" className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
+                    <select value={aiBankId} onChange={e=>setAiBankId(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
                       <option value="">— Select bank —</option>
-                      {(banksData?.data?.questionBanks||[]).map(b=>(
+                      {(banksData?.data?.questionBanks||[]).filter(b=>!aiCourseId||Number(b.courseId)===Number(aiCourseId)).map(b=>(
                         <option key={b.id} value={b.id}>{b.title} — {b.topic}</option>
                       ))}
                     </select>
@@ -1061,7 +1099,7 @@ export function InstructorCourseStudioPage() {
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold mb-1 text-slate-600">Course</label>
-                    <select id="ai-course-id" defaultValue={selId} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
+                    <select id="ai-course-id" value={aiCourseId} onChange={e=>{setAiCourseId(e.target.value);setAiBankId('');}} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
                       <option value="">— Select course —</option>
                       {(cData?.data?.courses||[]).map(c=>(
                         <option key={c.id} value={c.id}>{c.code} — {c.title}</option>
@@ -1069,12 +1107,8 @@ export function InstructorCourseStudioPage() {
                     </select>
                   </div>
                 </div>
-                <button type="button" disabled={aiSaving} onClick={() => {
-                  const bankId = document.getElementById('ai-bank-id')?.value;
-                  const courseId = document.getElementById('ai-course-id')?.value;
-                  handleSaveAiQuestions(bankId, courseId);
-                }} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg disabled:opacity-60">
-                  {aiSaving ? 'Saving...' : '💾 Save All to Question Bank'}
+                <button type="button" disabled={aiSaving || aiSelectedIndices.length===0 || !aiBankId || !aiQuestionSetTitle.trim()} onClick={handleSaveAiQuestionSet} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg disabled:opacity-60">
+                  {aiSaving ? 'Saving...' : `💾 Save ${aiSelectedIndices.length} Questions as Set`}
                 </button>
               </div>
             </div>
@@ -1470,29 +1504,57 @@ export function InstructorAssessmentsPage() {
   const [delQ, setDelQ] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(null); // assessment to add questions to
   const [attemptsOpen, setAttemptsOpen] = useState(null); // assessment to view attempts
+  const [pickerSourceTab, setPickerSourceTab] = useState('sets');
   const [pickerSelected, setPickerSelected] = useState([]);
 
-  const emptyA = { classId:'', courseId:'', title:'', assessmentType:'quiz', instructions:'', timeLimitMinutes:45, maxScore:100, openDate:'', closeDate:'', maxAttempts:1, randomizeQuestions:false, autoPublishResults:true, publicationStatus:'published', questionIds:[] };
+  const emptyA = { classId:'', courseId:'', title:'', assessmentType:'quiz', instructions:'', timeLimitMinutes:45, maxScore:100, openDate:'', closeDate:'', maxAttempts:1, randomizeQuestions:false, autoPublishResults:true, publicationStatus:'draft', questionIds:[] };
   const [aForm, setAForm] = useState(emptyA);
   const [qForm, setQForm] = useState({ questionBankId:'', courseId:'', topic:'', questionType:'multiple_choice', difficulty:'Medium', prompt:'', points:10, options:[{optionText:'Option A',isCorrect:true},{optionText:'Option B',isCorrect:false},{optionText:'Option C',isCorrect:false}] });
   const [bForm, setBForm] = useState({ courseId:'', title:'', topic:'', description:'' });
 
   const { data: banksData, isLoading } = useQuery({ queryKey:['question-banks'], queryFn:()=>lmsApi.listQuestionBanks() });
+  const { data: questionSetsData } = useQuery({ queryKey:['question-sets'], queryFn:()=>lmsApi.listQuestionSets() });
   const { data: assessData } = useQuery({ queryKey:['assessments'], queryFn:()=>lmsApi.listAssessments() });
   const { data: classesData } = useQuery({ queryKey:['classes'], queryFn:lmsApi.listClasses });
   const { data: coursesData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
 
   const banks = banksData?.data?.questionBanks||[];
+  const questionSets = questionSetsData?.data?.questionSets||[];
   const assessments = assessData?.data?.assessments||[];
   const allClasses = classesData?.data?.classes||[];
   const allCourses = coursesData?.data?.courses||[];
+  const attachedQuestionIds = new Set((pickerOpen?.assessmentQuestions||[]).map(link=>link.questionId));
 
   const handleSaveA = async (e) => {
     e.preventDefault();
     try {
       const payload = { ...aForm, classId:Number(aForm.classId), courseId:Number(aForm.courseId) };
-      if (editA) { await lmsApi.updateAssessment(editA.id, payload); addToast('Assessment updated.'); setEditA(null); }
-      else { await lmsApi.createAssessment(payload); addToast('Assessment created.'); setAOpen(false); }
+      if (editA) {
+        await lmsApi.updateAssessment(editA.id, payload);
+        addToast('Assessment updated.');
+        setEditA(null);
+      } else {
+        payload.publicationStatus = 'draft';
+        const res = await lmsApi.createAssessment(payload);
+        const assessment = res.data.assessment;
+        addToast('Draft assessment created. Add questions to continue.');
+        setAOpen(false);
+        setTab('assessments');
+        setPickerSelected([]);
+        setPickerSourceTab('sets');
+        setPickerOpen(assessment);
+      }
+      queryClient.invalidateQueries({ queryKey:['assessments'] });
+    } catch (err) { addToast(extractErrorMessage(err),'error'); }
+  };
+  const handlePublishA = async (assessment) => {
+    if (!assessment.assessmentQuestions?.length) {
+      addToast('Add at least one question before publishing this assessment.', 'error');
+      return;
+    }
+    try {
+      await lmsApi.updateAssessment(assessment.id, { publicationStatus: 'published' });
+      addToast('Assessment published.');
       queryClient.invalidateQueries({ queryKey:['assessments'] });
     } catch (err) { addToast(extractErrorMessage(err),'error'); }
   };
@@ -1563,8 +1625,9 @@ export function InstructorAssessmentsPage() {
       </div>
       <div><label className="block font-semibold mb-1.5">Status</label>
         <select value={aForm.publicationStatus} onChange={e=>setAForm(p=>({...p,publicationStatus:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
-          <option value="draft">Draft</option><option value="published">Published</option>
+          <option value="draft">Draft</option><option value="published" disabled={!editA?.assessmentQuestions?.length}>Published</option>
         </select>
+        {!editA?.assessmentQuestions?.length&&<p className="mt-1 text-[11px] text-slate-500">Add at least one question before publishing.</p>}
       </div>
       <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editA?'Update Assessment':'Create Assessment'}</button>
     </form>
@@ -1582,7 +1645,7 @@ export function InstructorAssessmentsPage() {
       </div>
 
       <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
-        {[['assessments',`Assessments (${assessments.length})`],['banks',`Question Banks (${banks.length})`]].map(([v,l])=>(
+        {[['assessments',`Assessments (${assessments.length})`],['sets',`Question Sets (${questionSets.length})`],['banks',`Question Banks (${banks.length})`]].map(([v,l])=>(
           <button key={v} type="button" onClick={()=>setTab(v)} className={`px-4 py-2 text-xs font-semibold rounded-md transition-colors ${tab===v?'bg-white text-blue-700 shadow-sm':'text-slate-600 hover:text-slate-800'}`}>{l}</button>
         ))}
       </div>
@@ -1596,10 +1659,11 @@ export function InstructorAssessmentsPage() {
                 <StatusBadge status={a.assessmentType}/>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">{a.timeLimitMinutes} min · {a.maxScore} pts</span>
-                  <button type="button" onClick={()=>{setPickerSelected([]);setPickerOpen(a);}} className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors" title="Add questions from bank"><Plus className="w-3.5 h-3.5"/></button>
+                  <button type="button" onClick={()=>{setPickerSelected([]);setPickerSourceTab('sets');setPickerOpen(a);}} className="p-1.5 rounded-lg text-slate-400 hover:text-violet-600 hover:bg-violet-50 transition-colors" title="Add questions from sets or bank" aria-label={`Add questions to ${a.title}`}><Plus className="w-3.5 h-3.5"/></button>
                   <button type="button" onClick={()=>setAttemptsOpen(a)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="View attempts"><Eye className="w-3.5 h-3.5"/></button>
                   <button type="button" onClick={()=>openEditA(a)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><Pencil className="w-3.5 h-3.5"/></button>
                   <button type="button" onClick={()=>setDelA(a)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
+                  {a.publicationStatus==='draft'&&<button type="button" disabled={!a.assessmentQuestions?.length} onClick={()=>handlePublishA(a)} className="px-2 py-1 rounded-md bg-emerald-600 text-white font-semibold disabled:cursor-not-allowed disabled:opacity-40" title={a.assessmentQuestions?.length?'Publish assessment':'Add questions before publishing'}>Publish</button>}
                 </div>
               </div>
               <h3 className="text-sm font-bold text-slate-900">{a.title}</h3>
@@ -1612,6 +1676,17 @@ export function InstructorAssessmentsPage() {
             </div>
           );
         })}</div>
+      ))}
+
+      {tab==='sets'&&(questionSets.length===0?<div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center"><p className="text-sm text-slate-400">No saved question sets yet. Generate and save questions from Course Studio.</p></div>:(
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{questionSets.map(set=>(
+          <div key={set.id} className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+            <div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-bold text-slate-900">{set.title}</h2><p className="text-xs text-slate-500 mt-1">{set.questionBank?.title} · {set.questions?.length||0} questions</p></div><StatusBadge status="saved"/></div>
+            <div className="space-y-2 border-t border-slate-100 pt-3">
+              {(set.questions||[]).map((question,index)=><p key={question.id} className="text-xs text-slate-700"><span className="font-semibold text-slate-400">Q{index+1}.</span> {question.prompt}</p>)}
+            </div>
+          </div>
+        ))}</div>
       ))}
 
       {tab==='banks'&&(isLoading?<LoadingState/>:banks.length===0?<div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center"><p className="text-sm text-slate-400">No question banks yet.</p></div>:(
@@ -1695,28 +1770,54 @@ export function InstructorAssessmentsPage() {
       {/* Question Picker Modal — add questions from bank to assessment */}
       <ModalDialog isOpen={Boolean(pickerOpen)} onClose={()=>setPickerOpen(null)} title={`Add Questions to: ${pickerOpen?.title}`} maxWidth="max-w-2xl">
         <div className="space-y-4 text-xs">
-          <p className="text-slate-500">Select questions from your question banks to add to this assessment.</p>
+          <p className="text-slate-500">Select a whole question set or pick individual questions. Your selections stay selected while you browse.</p>
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+            {[['sets','Question Sets'],['bank','All Bank Questions']].map(([value,label])=>(
+              <button key={value} type="button" onClick={()=>setPickerSourceTab(value)} className={`px-3 py-1.5 rounded-md font-semibold ${pickerSourceTab===value?'bg-white text-blue-700 shadow-sm':'text-slate-600'}`}>{label}</button>
+            ))}
+          </div>
           <div className="space-y-3 max-h-96 overflow-y-auto">
-            {banks.map(bank=>(
+            {pickerSourceTab==='sets'&&(
+              questionSets.filter(set=>Number(set.courseId)===Number(pickerOpen?.courseId)).length===0
+                ? <p className="py-6 text-center text-slate-400">No saved question sets for this course yet. Generate and save a set in Course Studio.</p>
+                : questionSets.filter(set=>Number(set.courseId)===Number(pickerOpen?.courseId)).map(set=>(
+                  <div key={set.id} className="rounded-lg border border-slate-200 p-3">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div><p className="font-bold text-slate-800">{set.title}</p><p className="text-slate-500">{set.questions?.length||0} questions · {set.questionBank?.title}</p></div>
+                      <button type="button" onClick={()=>setPickerSelected(selected=>Array.from(new Set([...selected,...(set.questions||[]).map(q=>q.id).filter(id=>!attachedQuestionIds.has(id))])))} className="shrink-0 rounded-md bg-violet-50 px-2.5 py-1.5 font-semibold text-violet-700 hover:bg-violet-100">Select full set</button>
+                    </div>
+                    {(set.questions||[]).map(q=>(
+                      <label key={q.id} className={`flex items-start gap-3 p-2 rounded-md ${attachedQuestionIds.has(q.id)?'opacity-60':'hover:bg-slate-50 cursor-pointer'}`}>
+                        <input type="checkbox" className="mt-0.5 rounded" checked={pickerSelected.includes(q.id)||attachedQuestionIds.has(q.id)} disabled={attachedQuestionIds.has(q.id)} onChange={()=>setPickerSelected(selected=>selected.includes(q.id)?selected.filter(id=>id!==q.id):[...selected,q.id])}/>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-0.5"><span className="font-mono text-blue-700 uppercase text-[10px]">{q.questionType?.replace(/_/g,' ')}</span><span className="text-slate-500">· {q.difficulty} · {q.points}pt</span></div>
+                          <p className="text-slate-900">{q.prompt}{attachedQuestionIds.has(q.id)&&<span className="ml-2 text-[10px] text-emerald-700">Already added</span>}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                ))
+            )}
+            {pickerSourceTab==='bank'&&banks.filter(bank=>Number(bank.courseId)===Number(pickerOpen?.courseId)).map(bank=>(
               <div key={bank.id}>
                 <p className="font-bold text-slate-700 mb-2 sticky top-0 bg-white py-1">{bank.title}</p>
                 {(bank.questions||[]).map(q=>(
                   <label key={q.id} className="flex items-start gap-3 p-2.5 rounded-lg border border-slate-200 mb-1.5 hover:bg-slate-50 cursor-pointer">
-                    <input type="checkbox" className="mt-0.5 rounded" checked={pickerSelected.includes(q.id)} onChange={()=>setPickerSelected(p=>p.includes(q.id)?p.filter(x=>x!==q.id):[...p,q.id])}/>
+                    <input type="checkbox" className="mt-0.5 rounded" checked={pickerSelected.includes(q.id)||attachedQuestionIds.has(q.id)} disabled={attachedQuestionIds.has(q.id)} onChange={()=>setPickerSelected(selected=>selected.includes(q.id)?selected.filter(id=>id!==q.id):[...selected,q.id])}/>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="font-mono text-blue-700 uppercase text-[10px]">{q.questionType?.replace(/_/g,' ')}</span>
-                        <span className="text-slate-500">· {q.difficulty} · {q.points}pt</span>
-                      </div>
+                      <div className="flex items-center gap-2 mb-0.5"><span className="font-mono text-blue-700 uppercase text-[10px]">{q.questionType?.replace(/_/g,' ')}</span><span className="text-slate-500">· {q.difficulty} · {q.points}pt</span></div>
                       <p className="text-slate-900 truncate">{q.prompt}</p>
                     </div>
                   </label>
                 ))}
               </div>
             ))}
+            {pickerSourceTab==='bank'&&!banks.some(bank=>Number(bank.courseId)===Number(pickerOpen?.courseId))&&(
+              <p className="py-6 text-center text-slate-400">No question banks are available for this course.</p>
+            )}
           </div>
           <div className="flex items-center justify-between pt-2 border-t border-slate-200">
-            <span className="text-slate-500">{pickerSelected.length} selected</span>
+            <span className="text-slate-500">{pickerSelected.length} selected to add</span>
             <button type="button" disabled={pickerSelected.length===0} onClick={async()=>{
               try {
                 await lmsApi.updateAssessment(pickerOpen.id,{ questionIds:pickerSelected });

@@ -3,7 +3,8 @@ const migrations = [
   ['20261028000001-create-lms-schema.js', require('../migrations/20261028000001-create-lms-schema')],
   ['20261103000001-add-student-placements.js', require('../migrations/20261103000001-add-student-placements')],
   ['20261105000001-add-joincodes-and-attendance.js', require('../migrations/20261105000001-add-joincodes-and-attendance')],
-  ['20261105000001-widen-avatar-url.js', require('../migrations/20261105000001-widen-avatar-url')]
+  ['20261105000001-widen-avatar-url.js', require('../migrations/20261105000001-widen-avatar-url')],
+  ['20261110000001-create-question-sets.js', require('../migrations/20261110000001-create-question-sets')]
 ];
 const logger = require('../config/logger');
 

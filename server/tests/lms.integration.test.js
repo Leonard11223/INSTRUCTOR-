@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 
 const { app, sessionStore } = require('../src/app');
+const {
+  Assessment,
+  AssessmentQuestion,
+  Question,
+  QuestionOption,
+  QuestionSet,
+  QuestionSetQuestion
+} = require('../src/models');
 const resetDatabase = require('../src/utils/resetDatabase');
 const { createAgent } = require('./testAgent');
 
@@ -285,6 +293,124 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
   });
 
   describe('6. Quiz & Examination Engine (Server-Timed, Answer Key Protection & Auto-Grading)', () => {
+    it('saves only selected generated questions as a reusable course question set', async () => {
+      const createRes = await instructorAgent.post('/api/question-sets').send({
+        courseId: 1,
+        questionBankId: 1,
+        title: 'Selected Generated Question Set Test',
+        description: 'Regression test for selected generated questions.',
+        questions: [
+          {
+            topic: 'Routing',
+            questionType: 'multiple_choice',
+            difficulty: 'Easy',
+            prompt: 'Which protocol selects routes using link-state information?',
+            points: 2,
+            options: [
+              { optionText: 'OSPF', isCorrect: true },
+              { optionText: 'FTP', isCorrect: false }
+            ]
+          },
+          {
+            topic: 'Routing',
+            questionType: 'multiple_choice',
+            difficulty: 'Medium',
+            prompt: 'Which algorithm is used by OSPF to calculate shortest paths?',
+            points: 2,
+            options: [
+              { optionText: 'Dijkstra', isCorrect: true },
+              { optionText: 'AES', isCorrect: false }
+            ]
+          }
+        ]
+      });
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.data.questionSet.questions).toHaveLength(2);
+      expect(createRes.body.data.questionSet.questions[0].options).toHaveLength(2);
+
+      const listRes = await instructorAgent.get('/api/question-sets?courseId=1');
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.data.questionSets.some((set) => (
+        set.title === 'Selected Generated Question Set Test' && set.questions.length === 2
+      ))).toBe(true);
+
+      const set = await QuestionSet.findOne({ where: { title: 'Selected Generated Question Set Test' } });
+      const setQuestions = await QuestionSetQuestion.findAll({ where: { questionSetId: set.id } });
+      const questionIds = setQuestions.map((item) => item.questionId);
+      try {
+        expect(questionIds).toHaveLength(2);
+        expect(await Question.count({ where: { id: questionIds, questionBankId: 1, courseId: 1 } })).toBe(2);
+      } finally {
+        await QuestionSetQuestion.destroy({ where: { questionSetId: set.id } });
+        await QuestionOption.destroy({ where: { questionId: questionIds } });
+        await Question.destroy({ where: { id: questionIds } });
+        await set.destroy();
+      }
+    });
+
+    it('requires questions before publishing an assessment and allows publishing after questions are attached', async () => {
+      const payload = {
+        classId: 1,
+        courseId: 1,
+        title: 'Guided Assessment Publishing Test',
+        assessmentType: 'quiz',
+        instructions: 'Answer the question to complete this quiz.',
+        closeDate: '2027-12-31T23:59:00Z',
+        timeLimitMinutes: 15,
+        maxScore: 100,
+        maxAttempts: 1
+      };
+
+      const publishedCreateRes = await instructorAgent
+        .post('/api/assessments')
+        .send({ ...payload, publicationStatus: 'published' });
+      expect(publishedCreateRes.status).toBe(400);
+
+      const createRes = await instructorAgent
+        .post('/api/assessments')
+        .send({ ...payload, publicationStatus: 'draft' });
+      expect(createRes.status).toBe(201);
+      const assessmentId = createRes.body.data.assessment.id;
+
+      try {
+        const publishEmptyRes = await instructorAgent
+          .put(`/api/assessments/${assessmentId}`)
+          .send({ publicationStatus: 'published' });
+        expect(publishEmptyRes.status).toBe(400);
+
+        const publishWithQuestionsRes = await instructorAgent
+          .put(`/api/assessments/${assessmentId}`)
+          .send({ questionIds: [7], publicationStatus: 'published' });
+        expect(publishWithQuestionsRes.status).toBe(200);
+        expect(publishWithQuestionsRes.body.data.assessment.publicationStatus).toBe('published');
+      } finally {
+        await AssessmentQuestion.destroy({ where: { assessmentId } });
+        await Assessment.destroy({ where: { id: assessmentId } });
+      }
+    });
+
+    it('adds selected question-bank questions to an assessment without duplicating them', async () => {
+      const assessmentId = 1;
+      try {
+        const addQuestionsRes = await instructorAgent
+          .put(`/api/assessments/${assessmentId}`)
+          .send({ questionIds: [7] });
+        expect(addQuestionsRes.status).toBe(200);
+
+        const repeatAddRes = await instructorAgent
+          .put(`/api/assessments/${assessmentId}`)
+          .send({ questionIds: [7] });
+        expect(repeatAddRes.status).toBe(200);
+
+        const startRes = await student2Agent.post(`/api/assessments/${assessmentId}/start`);
+        expect(startRes.status).toBe(200);
+        expect(startRes.body.data.questions).toHaveLength(7);
+        expect(startRes.body.data.questions.some((question) => question.questionId === 7)).toBe(true);
+      } finally {
+        await AssessmentQuestion.destroy({ where: { assessmentId, questionId: 7 } });
+      }
+    });
+
     it('starts a quiz attempt for student2 without exposing answer keys and auto-grades upon submission', async () => {
       const startRes = await student2Agent.post('/api/assessments/1/start');
       expect(startRes.status).toBe(200);
