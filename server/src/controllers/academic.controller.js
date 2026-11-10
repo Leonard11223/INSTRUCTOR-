@@ -892,6 +892,20 @@ async function listClasses(req, res, next) {
       where.id = assigned.map((a) => a.classId);
     }
 
+    const membershipsInclude = {
+      model: ClassMembership,
+      as: 'memberships',
+      include: [{ model: User, as: 'student', attributes: ['id', 'firstName', 'lastName', 'email', 'studentNumber'] }]
+    };
+    if (role === 'teaching_assistant') {
+      const rosterAssignments = await TeachingAssistantAssignment.findAll({
+        where: { taUserId: req.user.id, canViewRoster: true },
+        attributes: ['classId']
+      });
+      membershipsInclude.where = { classId: rosterAssignments.map((assignment) => assignment.classId) };
+      membershipsInclude.required = false;
+    }
+
     const classes = await ClassSection.findAll({
       where,
       include: [
@@ -914,11 +928,7 @@ async function listClasses(req, res, next) {
           as: 'taAssignments',
           include: [{ model: User, as: 'teachingAssistant', attributes: ['id', 'firstName', 'lastName', 'email'] }]
         },
-        {
-          model: ClassMembership,
-          as: 'memberships',
-          include: [{ model: User, as: 'student', attributes: ['id', 'firstName', 'lastName', 'email', 'studentNumber'] }]
-        }
+        membershipsInclude
       ],
       order: [['id', 'ASC']]
     });
@@ -1925,4 +1935,3 @@ module.exports = {
   transferStudentSection,
   importRecordsCsv
 };
-

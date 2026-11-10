@@ -7,7 +7,9 @@ const {
   Question,
   QuestionOption,
   QuestionSet,
-  QuestionSetQuestion
+  QuestionSetQuestion,
+  TeachingAssistantAssignment,
+  User
 } = require('../src/models');
 const resetDatabase = require('../src/utils/resetDatabase');
 const { createAgent } = require('./testAgent');
@@ -56,6 +58,39 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
         const dashRes = await item.agent.get('/api/dashboards/summary');
         expect(dashRes.status).toBe(200);
         expect(dashRes.body.data.role).toBe(item.expectedRole);
+      }
+    });
+
+    it('returns assigned-class monitoring to TAs and enforces the roster permission', async () => {
+      const classesRes = await taAgent.get('/api/classes');
+      expect(classesRes.status).toBe(200);
+      const classId = classesRes.body.data.classes[0].id;
+      const monitoringRes = await taAgent.get(`/api/dashboards/ta-student-monitoring/${classId}`);
+
+      expect(monitoringRes.status).toBe(200);
+      expect(monitoringRes.body.data.classId).toBe(classId);
+      expect(monitoringRes.body.data.students.length).toBeGreaterThan(0);
+      expect(monitoringRes.body.data.students[0]).toHaveProperty('progress');
+      expect(monitoringRes.body.data.students[0]).toHaveProperty('lastActivity');
+
+      const ta = await User.findOne({ where: { email: 'ta@academy.edu' } });
+      const taAssignment = await TeachingAssistantAssignment.findOne({
+        where: { taUserId: ta.id, classId }
+      });
+      const originalCanViewRoster = taAssignment.canViewRoster;
+      await taAssignment.update({ canViewRoster: false });
+      try {
+        const classesWithoutRosterRes = await taAgent.get('/api/classes');
+        expect(classesWithoutRosterRes.status).toBe(200);
+        const restrictedClass = classesWithoutRosterRes.body.data.classes.find((classSection) => classSection.id === classId);
+        expect(restrictedClass).toBeDefined();
+        expect(restrictedClass.memberships).toEqual([]);
+
+        const restrictedRes = await taAgent.get(`/api/dashboards/ta-student-monitoring/${classId}`);
+        expect(restrictedRes.status).toBe(403);
+        expect(restrictedRes.body.code).toBe('TA_PERMISSION_DENIED');
+      } finally {
+        await taAssignment.update({ canViewRoster: originalCanViewRoster });
       }
     });
 

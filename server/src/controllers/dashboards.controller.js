@@ -658,6 +658,7 @@ async function getTaStudentMonitoring(req, res, next) {
       allowAdmin: true,
       allowInstructor: true,
       allowTA: true,
+      requiredTaFlag: 'canViewRoster',
     });
 
     // Parallel fetch of all data needed
@@ -839,4 +840,3 @@ async function getTaStudentMonitoring(req, res, next) {
 }
 
 module.exports = { getDashboardSummary, getTaStudentMonitoring };
-
