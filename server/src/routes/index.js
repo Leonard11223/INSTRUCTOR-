@@ -112,6 +112,7 @@ router.delete('/course-offerings/:id', requireAuth, requirePermission('courses:m
 router.get('/classes', requireAuth, acadCtrl.listClasses);
 router.get('/classes/:id', requireAuth, acadCtrl.getClassById);
 router.post('/classes', requireAuth, requirePermission('classes:manage'), acadCtrl.createClassSection);
+router.post('/classes/instructor', requireAuth, requireRole('instructor'), acadCtrl.createInstructorClassSection);
 router.put('/classes/:id', requireAuth, requirePermission('classes:manage'), acadCtrl.updateClassSection);
 router.delete('/classes/:id', requireAuth, requirePermission('classes:manage'), acadCtrl.deleteClassSection);
 router.post('/classes/:id/instructors', requireAuth, requirePermission('classes:manage'), acadCtrl.assignInstructorToClass);

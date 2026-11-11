@@ -1,4 +1,5 @@
 const argon2 = require('argon2');
+const crypto = require('crypto');
 const {
   sequelize,
   Institution,
@@ -1000,38 +1001,44 @@ async function getClassById(req, res, next) {
   }
 }
 
+async function createClassSectionRecords(payload, instructorId, assignedBy, transaction, joinCodeEnabled = false) {
+  const classSection = await ClassSection.create({
+    courseOfferingId: payload.courseOfferingId,
+    sectionCode: payload.sectionCode,
+    name: payload.name,
+    room: payload.room || null,
+    schedule: payload.schedule || null,
+    capacity: payload.capacity || 40,
+    allowLateSubmissions: payload.allowLateSubmissions ?? true,
+    latePenaltyPercent: payload.latePenaltyPercent ?? 10,
+    joinCode: joinCodeEnabled ? crypto.randomBytes(4).toString('hex').toUpperCase() : null,
+    joinCodeEnabled
+  }, { transaction });
+
+  await GradeCategory.bulkCreate([
+    { classId: classSection.id, name: 'Quizzes', categoryType: 'quiz', weightPercent: 20, orderIndex: 1 },
+    { classId: classSection.id, name: 'Assignments', categoryType: 'assignment', weightPercent: 25, orderIndex: 2 },
+    { classId: classSection.id, name: 'Laboratory Activities', categoryType: 'laboratory', weightPercent: 25, orderIndex: 3 },
+    { classId: classSection.id, name: 'Major Examination', categoryType: 'major_exam', weightPercent: 30, orderIndex: 4 }
+  ], { transaction });
+
+  if (instructorId) {
+    await InstructorAssignment.create({
+      classId: classSection.id,
+      instructorId,
+      isPrimary: true,
+      assignedBy
+    }, { transaction });
+  }
+
+  return classSection;
+}
+
 async function createClassSection(req, res, next) {
   const t = await sequelize.transaction();
   try {
     const payload = classSectionSchema.parse(req.body);
-    const classSection = await ClassSection.create({
-      courseOfferingId: payload.courseOfferingId,
-      sectionCode: payload.sectionCode,
-      name: payload.name,
-      room: payload.room || null,
-      schedule: payload.schedule || null,
-      capacity: payload.capacity || 40,
-      allowLateSubmissions: payload.allowLateSubmissions ?? true,
-      latePenaltyPercent: payload.latePenaltyPercent ?? 10
-    }, { transaction: t });
-
-    // Seed default weighted grade categories (20 / 25 / 25 / 30)
-    await GradeCategory.bulkCreate([
-      { classId: classSection.id, name: 'Quizzes', categoryType: 'quiz', weightPercent: 20, orderIndex: 1 },
-      { classId: classSection.id, name: 'Assignments', categoryType: 'assignment', weightPercent: 25, orderIndex: 2 },
-      { classId: classSection.id, name: 'Laboratory Activities', categoryType: 'laboratory', weightPercent: 25, orderIndex: 3 },
-      { classId: classSection.id, name: 'Major Examination', categoryType: 'major_exam', weightPercent: 30, orderIndex: 4 }
-    ], { transaction: t });
-
-    if (payload.instructorId) {
-      await InstructorAssignment.create({
-        classId: classSection.id,
-        instructorId: payload.instructorId,
-        isPrimary: true,
-        assignedBy: req.user.id
-      }, { transaction: t });
-    }
-
+    const classSection = await createClassSectionRecords(payload, payload.instructorId, req.user.id, t);
     await t.commit();
 
     await recordAudit({
@@ -1049,7 +1056,40 @@ async function createClassSection(req, res, next) {
       data: { classSection }
     });
   } catch (err) {
-    await t.rollback();
+    if (!t.finished) await t.rollback();
+    return next(err);
+  }
+}
+
+async function createInstructorClassSection(req, res, next) {
+  const t = await sequelize.transaction();
+  try {
+    const payload = classSectionSchema.parse(req.body);
+    const offering = await CourseOffering.findByPk(payload.courseOfferingId, { transaction: t });
+    if (!offering) throw new AppError('Course offering not found.', 404, 'OFFERING_NOT_FOUND');
+    if (offering.status !== 'published') {
+      throw new AppError('Only published course offerings can be used to create a class.', 400, 'OFFERING_NOT_PUBLISHED');
+    }
+
+    const classSection = await createClassSectionRecords(payload, req.user.id, req.user.id, t, true);
+    await t.commit();
+
+    await recordAudit({
+      req,
+      action: 'INSTRUCTOR_CLASS_SECTION_CREATED',
+      category: 'academic',
+      entityType: 'ClassSection',
+      entityId: classSection.id,
+      metadata: { courseOfferingId: payload.courseOfferingId, sectionCode: payload.sectionCode }
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Class section created and assigned to you.',
+      data: { classSection }
+    });
+  } catch (err) {
+    if (!t.finished) await t.rollback();
     return next(err);
   }
 }
@@ -1369,7 +1409,11 @@ async function enrollStudent(req, res, next) {
       transaction: t
     });
     if (!placement) {
-      throw new AppError('Student academic placement is not set for this year. Contact the registrar.', 403, 'PLACEMENT_REQUIRED');
+      throw new AppError(
+        'Direct enrollment requires academic placement. Ask your instructor for a class join code to request enrollment.',
+        403,
+        'PLACEMENT_REQUIRED'
+      );
     }
     if (!isPlacementEligibleForSection(placement, classSection)) {
       throw new AppError('Student is not eligible for this class section based on their academic placement.', 403, 'SECTION_NOT_ELIGIBLE');
@@ -1920,6 +1964,7 @@ module.exports = {
   listClasses,
   getClassById,
   createClassSection,
+  createInstructorClassSection,
   updateClassSection,
   deleteClassSection,
   updateClassEligibility,

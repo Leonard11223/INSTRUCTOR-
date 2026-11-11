@@ -1,6 +1,6 @@
-﻿import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
   CartesianGrid, PieChart, Pie, Cell
@@ -60,6 +60,41 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }) {
   );
 }
 const CHART_COLORS = ['#2563eb','#7c3aed','#059669','#d97706','#dc2626'];
+const EMPTY_ASSESSMENT_FORM = { classId:'', courseId:'', moduleId:'', title:'', assessmentType:'quiz', instructions:'', timeLimitMinutes:45, maxScore:100, openDate:'', closeDate:'', maxAttempts:1, randomizeQuestions:false, autoPublishResults:true, publicationStatus:'draft', questionIds:[] };
+function createCurriculumModule(draftId) {
+  return {
+    draftId,
+    title: '',
+    description: '',
+    estimatedMinutes: 60,
+    lessons: [],
+    savedModuleId: null,
+    savedLessonDraftIds: [],
+    quiz: {
+      enabled: false,
+      title: '',
+      classId: '',
+      instructions: '',
+      closeDate: '',
+      timeLimitMinutes: 45,
+      maxScore: 100,
+      maxAttempts: 1,
+      questionIds: [],
+      savedAssessmentId: null
+    }
+  };
+}
+function createCurriculumLesson(draftId) {
+  return {
+    draftId,
+    title: '',
+    lessonType: 'reading',
+    contentHtml: '<p></p>',
+    estimatedMinutes: 30,
+    publicationStatus: 'published',
+    file: null
+  };
+}
 
 /* ══════════════════════════════════════════════════════════════
    1. DASHBOARD
@@ -201,10 +236,12 @@ export function InstructorCourseStudioPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
   const [selId, setSelId] = useState(null);
+  const curriculumDraftId = useRef(0);
   const [studioTab, setStudioTab] = useState('content');
-  const [modOpen, setModOpen] = useState(false);
-  const [lesOpen, setLesOpen] = useState(false);
   const [courseOpen, setCourseOpen] = useState(false);
+  const [curriculumOpen, setCurriculumOpen] = useState(false);
+  const [curriculumDrafts, setCurriculumDrafts] = useState([]);
+  const [curriculumSaving, setCurriculumSaving] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [editMod, setEditMod] = useState(null);
   const [editLes, setEditLes] = useState(null);
@@ -233,7 +270,17 @@ export function InstructorCourseStudioPage() {
 
   const { data: cData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
   const { data: dData, isLoading } = useQuery({ queryKey:['course',selId], queryFn:()=>lmsApi.getCourseById(selId), enabled:Boolean(selId) });
+  const { data: assessmentsData } = useQuery({
+    queryKey: ['assessments', 'course', selId],
+    queryFn: () => lmsApi.listAssessments({ courseId: Number(selId) }),
+    enabled: Boolean(selId)
+  });
   const { data: banksData } = useQuery({ queryKey:['question-banks'], queryFn:()=>lmsApi.listQuestionBanks() });
+  const { data: questionSetsData } = useQuery({
+    queryKey: ['question-sets', 'course', selId],
+    queryFn: () => lmsApi.listQuestionSets({ courseId: Number(selId) }),
+    enabled: Boolean(selId)
+  });
   const { data: deptsData } = useQuery({ queryKey:['departments'], queryFn:()=>lmsApi.listDepartments() });
   const refresh = () => queryClient.invalidateQueries({ queryKey:['course',selId] });
 
@@ -356,15 +403,9 @@ export function InstructorCourseStudioPage() {
   const handleSaveMod = async (e) => {
     e.preventDefault();
     try {
-      if (editMod) {
-        await lmsApi.updateModule(editMod.id, modForm);
-        addToast('Module updated.');
-        setEditMod(null);
-      } else {
-        await lmsApi.createModule({ ...modForm, courseId: Number(selId) });
-        addToast('Module added.');
-        setModOpen(false);
-      }
+      await lmsApi.updateModule(editMod.id, modForm);
+      addToast('Module updated.');
+      setEditMod(null);
       refresh();
     } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
@@ -372,32 +413,16 @@ export function InstructorCourseStudioPage() {
   const handleSaveLes = async (e) => {
     e.preventDefault();
     try {
-      if (editLes) {
-        await lmsApi.updateLesson(editLes.id, lesForm);
-        if (lesFile) {
-          const fd = new FormData();
-          fd.append('file', lesFile);
-          fd.append('title', lesFile.name);
-          await lmsApi.attachFileToLesson(editLes.id, fd);
-          setLesFile(null);
-        }
-        addToast('Lesson updated.');
-        setEditLes(null);
-      } else {
-        if (lesFile) {
-          const fd = new FormData();
-          Object.entries({ ...lesForm, courseId: String(selId) }).forEach(([k, v]) => {
-            if (v !== null && v !== undefined) fd.append(k, String(v));
-          });
-          fd.append('file', lesFile);
-          await lmsApi.createLesson(fd);
-          setLesFile(null);
-        } else {
-          await lmsApi.createLesson({ ...lesForm, courseId: Number(selId) });
-        }
-        addToast('Lesson published.');
-        setLesOpen(false);
+      await lmsApi.updateLesson(editLes.id, lesForm);
+      if (lesFile) {
+        const fd = new FormData();
+        fd.append('file', lesFile);
+        fd.append('title', lesFile.name);
+        await lmsApi.attachFileToLesson(editLes.id, fd);
+        setLesFile(null);
       }
+      addToast('Lesson updated.');
+      setEditLes(null);
       refresh();
     } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
@@ -420,11 +445,8 @@ export function InstructorCourseStudioPage() {
       if (!newCourse) throw new Error('Course creation failed.');
       addToast('Course created: ' + newCourse.title);
 
-      // 2. If a class section exists for the new course, auto-generate join code
-      // (Class sections are created by Academic Admin — we just show the course was created)
-      // Store result to display to instructor
+      setSelId(newCourse.id);
       setNewCourseResult({ course: newCourse, joinCode: null });
-      setCourseOpen(false);
       setCourseForm({ title:'', code:'', description:'', category:'networking', creditUnits:3, deliveryMode:'Instructor-Led', level:'Intermediate', departmentId:'' });
       queryClient.invalidateQueries({ queryKey:['courses'] });
     } catch (err) { addToast(extractErrorMessage(err), 'error'); }
@@ -453,6 +475,210 @@ export function InstructorCourseStudioPage() {
 
   const courses = cData?.data?.courses || [];
   const course = dData?.data?.course;
+  const courseClasses = (course?.offerings || []).flatMap((offering) => offering.classes || []);
+  const courseQuestionBanks = (banksData?.data?.questionBanks || [])
+    .filter((bank) => Number(bank.courseId) === Number(selId));
+  const curriculumQuestions = [...new Map(
+    courseQuestionBanks.flatMap((bank) => bank.questions || []).map((question) => [question.id, question])
+  ).values()];
+  const questionSets = questionSetsData?.data?.questionSets || [];
+  const openCurriculumBuilder = () => {
+    if (curriculumDrafts.length === 0) {
+      setCurriculumDrafts([createCurriculumModule(++curriculumDraftId.current)]);
+    }
+    setCurriculumOpen(true);
+  };
+  const updateCurriculumModule = (draftId, updates) => {
+    setCurriculumDrafts((drafts) => drafts.map((draft) => (
+      draft.draftId === draftId ? { ...draft, ...updates } : draft
+    )));
+  };
+  const addCurriculumModule = () => {
+    setCurriculumDrafts((drafts) => [...drafts, createCurriculumModule(++curriculumDraftId.current)]);
+  };
+  const addCurriculumLesson = (moduleDraftId) => {
+    setCurriculumDrafts((drafts) => drafts.map((draft) => (
+      draft.draftId === moduleDraftId
+        ? { ...draft, lessons: [...draft.lessons, createCurriculumLesson(++curriculumDraftId.current)] }
+        : draft
+    )));
+  };
+  const updateCurriculumLesson = (moduleDraftId, lessonDraftId, updates) => {
+    setCurriculumDrafts((drafts) => drafts.map((draft) => (
+      draft.draftId === moduleDraftId
+        ? {
+          ...draft,
+          lessons: draft.lessons.map((lesson) => (
+            lesson.draftId === lessonDraftId ? { ...lesson, ...updates } : lesson
+          ))
+        }
+        : draft
+    )));
+  };
+  const updateCurriculumQuiz = (moduleDraftId, updates) => {
+    setCurriculumDrafts((drafts) => drafts.map((draft) => (
+      draft.draftId === moduleDraftId
+        ? { ...draft, quiz: { ...draft.quiz, ...updates } }
+        : draft
+    )));
+  };
+  const saveCurriculum = async () => {
+    if (!course) {
+      addToast('Wait for the selected course to finish loading.', 'error');
+      return;
+    }
+    for (const draft of curriculumDrafts) {
+      if (!draft.savedModuleId && !draft.title.trim()) {
+        addToast('Enter a title for each module before saving.', 'error');
+        return;
+      }
+      if (draft.lessons.some((lesson) => !draft.savedLessonDraftIds.includes(lesson.draftId) && !lesson.title.trim())) {
+        addToast('Enter a title for each topic before saving.', 'error');
+        return;
+      }
+      if (draft.quiz.enabled && !draft.quiz.savedAssessmentId) {
+        if (!draft.quiz.classId) {
+          addToast(`Select a class section for the quiz in "${draft.title}".`, 'error');
+          return;
+        }
+        if (!draft.quiz.closeDate || draft.quiz.instructions.trim().length < 5) {
+          addToast(`Enter quiz instructions and a closing date for "${draft.title}".`, 'error');
+          return;
+        }
+        if (draft.quiz.questionIds.length === 0) {
+          addToast(`Select at least one question for the quiz in "${draft.title}".`, 'error');
+          return;
+        }
+      }
+    }
+
+    setCurriculumSaving(true);
+    let savedModules = 0;
+    let savedLessons = 0;
+    let savedQuizzes = 0;
+    try {
+      const latestCourseResponse = await lmsApi.getCourseById(course.id);
+      const latestCourse = latestCourseResponse.data.course;
+      for (let moduleIndex = 0; moduleIndex < curriculumDrafts.length; moduleIndex += 1) {
+        const draft = curriculumDrafts[moduleIndex];
+        let moduleId = draft.savedModuleId;
+        const savedLessonDraftIds = new Set(draft.savedLessonDraftIds);
+        let savedAssessmentId = draft.quiz.savedAssessmentId;
+
+        if (!moduleId) {
+          const result = await lmsApi.createModule({
+            title: draft.title.trim(),
+            description: draft.description.trim(),
+            estimatedMinutes: Number(draft.estimatedMinutes) || 60,
+            orderIndex: (latestCourse.modules?.length || 0) + moduleIndex + 1,
+            courseId: Number(course.id)
+          });
+          moduleId = result.data.module.id;
+          savedModules += 1;
+          setCurriculumDrafts((drafts) => drafts.map((item) => (
+            item.draftId === draft.draftId ? { ...item, savedModuleId: moduleId } : item
+          )));
+        }
+
+        for (let lessonIndex = 0; lessonIndex < draft.lessons.length; lessonIndex += 1) {
+          const lesson = draft.lessons[lessonIndex];
+          if (savedLessonDraftIds.has(lesson.draftId)) continue;
+          const lessonPayload = {
+            moduleId: Number(moduleId),
+            courseId: Number(course.id),
+            title: lesson.title.trim(),
+            lessonType: lesson.lessonType,
+            orderIndex: lessonIndex + 1,
+            contentHtml: lesson.contentHtml || '<p></p>',
+            estimatedMinutes: Number(lesson.estimatedMinutes) || 30,
+            publicationStatus: lesson.publicationStatus
+          };
+          const existingLesson = (latestCourse.modules || [])
+            .find((module) => Number(module.id) === Number(moduleId))
+            ?.lessons?.find((savedLesson) => (
+              savedLesson.title === lessonPayload.title &&
+              savedLesson.lessonType === lessonPayload.lessonType &&
+              savedLesson.contentHtml === lessonPayload.contentHtml
+            ));
+          if (existingLesson) {
+            const alreadyHasFile = (existingLesson.resources || []).some(
+              (resource) => resource.originalFilename === lesson.file?.name
+            );
+            if (lesson.file && !alreadyHasFile) {
+              const formData = new FormData();
+              formData.append('file', lesson.file);
+              formData.append('title', lesson.file.name);
+              await lmsApi.attachFileToLesson(existingLesson.id, formData);
+            }
+            savedLessonDraftIds.add(lesson.draftId);
+            savedLessons += 1;
+            setCurriculumDrafts((drafts) => drafts.map((item) => (
+              item.draftId === draft.draftId
+                ? { ...item, savedLessonDraftIds: [...savedLessonDraftIds] }
+                : item
+            )));
+            continue;
+          }
+          if (lesson.file) {
+            const formData = new FormData();
+            Object.entries(lessonPayload).forEach(([key, value]) => formData.append(key, String(value)));
+            formData.append('file', lesson.file);
+            await lmsApi.createLesson(formData);
+          } else {
+            await lmsApi.createLesson(lessonPayload);
+          }
+          savedLessonDraftIds.add(lesson.draftId);
+          savedLessons += 1;
+          setCurriculumDrafts((drafts) => drafts.map((item) => (
+            item.draftId === draft.draftId
+              ? { ...item, savedLessonDraftIds: [...savedLessonDraftIds] }
+              : item
+          )));
+        }
+
+        if (draft.quiz.enabled && !savedAssessmentId) {
+          const result = await lmsApi.createAssessment({
+            classId: Number(draft.quiz.classId),
+            courseId: Number(course.id),
+            moduleId: Number(moduleId),
+            title: (draft.quiz.title.trim() || `${draft.title.trim()} Quiz`).slice(0, 220),
+            assessmentType: 'quiz',
+            instructions: draft.quiz.instructions.trim(),
+            closeDate: `${draft.quiz.closeDate}T23:59:00Z`,
+            timeLimitMinutes: Number(draft.quiz.timeLimitMinutes),
+            maxScore: Number(draft.quiz.maxScore),
+            maxAttempts: Number(draft.quiz.maxAttempts),
+            questionIds: draft.quiz.questionIds.map(Number),
+            publicationStatus: 'draft'
+          });
+          savedAssessmentId = result.data.assessment.id;
+          savedQuizzes += 1;
+          setCurriculumDrafts((drafts) => drafts.map((item) => (
+            item.draftId === draft.draftId
+              ? { ...item, quiz: { ...item.quiz, savedAssessmentId } }
+              : item
+          )));
+        }
+
+        setCurriculumDrafts((drafts) => drafts.filter((item) => item.draftId !== draft.draftId));
+      }
+
+      addToast(`Curriculum saved: ${savedModules} modules, ${savedLessons} topics, ${savedQuizzes} quizzes.`);
+      setCurriculumOpen(false);
+      setCurriculumDrafts([]);
+      queryClient.invalidateQueries({ queryKey: ['course', selId] });
+      queryClient.invalidateQueries({ queryKey: ['assessments'] });
+    } catch (err) {
+      addToast(
+        `Some curriculum items may already be saved. Reopen this builder to continue. ${extractErrorMessage(err)}`,
+        'error'
+      );
+      queryClient.invalidateQueries({ queryKey: ['course', selId] });
+      queryClient.invalidateQueries({ queryKey: ['assessments'] });
+    } finally {
+      setCurriculumSaving(false);
+    }
+  };
   const toggle = (id) => setExpanded(p => ({ ...p, [id]: p[id] === false }));
   const emoji = { laboratory: '🔬', video: '🎬', coding_exercise: '💻', reading: '📖' };
   const openEditMod = (mod) => { setModForm({ title: mod.title, description: mod.description || '', orderIndex: mod.orderIndex || 1, estimatedMinutes: mod.estimatedMinutes || 60 }); setEditMod(mod); };
@@ -480,11 +706,8 @@ export function InstructorCourseStudioPage() {
           <p className="text-sm text-slate-500 mt-1">Author modules, lessons, and attach learning resources.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button type="button" onClick={() => { setModForm({ title:'', description:'', orderIndex:1, estimatedMinutes:60 }); setModOpen(true); }} className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg flex items-center gap-1.5">
-            <Plus className="w-3.5 h-3.5" /> Module
-          </button>
-          <button type="button" onClick={() => { setLesForm({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'<h2>Objectives</h2>', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' }); setLesOpen(true); }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
-            <Plus className="w-3.5 h-3.5" /> Lesson
+          <button type="button" onClick={openCurriculumBuilder} disabled={!selId || isLoading} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
+            <Plus className="w-3.5 h-3.5" /> Build curriculum
           </button>
           <button type="button" onClick={() => setCourseOpen(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" /> Add Course
@@ -588,6 +811,8 @@ export function InstructorCourseStudioPage() {
               ) : (
                 (course.modules || []).map((mod, mi) => {
                   const open = expanded[mod.id] !== false;
+                  const moduleAssessments = (assessmentsData?.data?.assessments || [])
+                    .filter((assessment) => Number(assessment.moduleId) === Number(mod.id));
                   return (
                     <div key={mod.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                       <div className="px-5 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
@@ -638,6 +863,31 @@ export function InstructorCourseStudioPage() {
                           )}
                         </div>
                       )}
+                      <div className="border-t border-slate-200 bg-violet-50/50 px-5 py-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold text-slate-800">End-of-module quiz</p>
+                            {moduleAssessments.length > 0 ? (
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                {moduleAssessments.map((assessment) => (
+                                  <span key={assessment.id} className="inline-flex items-center gap-1.5 text-[11px] text-slate-600">
+                                    {assessment.title}<StatusBadge status={assessment.publicationStatus || 'draft'} />
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-slate-500 mt-0.5">No quiz has been linked to this module yet.</p>
+                            )}
+                          </div>
+                          <Link
+                            to={`/instructor/assessments?courseId=${course.id}&moduleId=${mod.id}`}
+                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-lg shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Create module quiz
+                          </Link>
+                        </div>
+                      </div>
                     </div>
                   );
                 })
@@ -803,7 +1053,7 @@ export function InstructorCourseStudioPage() {
       )}
 
       {/* Module Modal */}
-      <ModalDialog isOpen={modOpen || Boolean(editMod)} onClose={() => { setModOpen(false); setEditMod(null); }} title={editMod ? 'Edit Module' : 'Create Module'}>
+      <ModalDialog isOpen={Boolean(editMod)} onClose={() => setEditMod(null)} title="Edit Module">
         <form onSubmit={handleSaveMod} className="space-y-4 text-xs">
           <div><label className="block font-semibold mb-1.5">Title</label><input required value={modForm.title} onChange={e => setModForm({ ...modForm, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
           <div><label className="block font-semibold mb-1.5">Description</label><textarea rows={3} value={modForm.description} onChange={e => setModForm({ ...modForm, description: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
@@ -816,7 +1066,7 @@ export function InstructorCourseStudioPage() {
       </ModalDialog>
 
       {/* Lesson Modal */}
-      <ModalDialog isOpen={lesOpen || Boolean(editLes)} onClose={() => { setLesOpen(false); setEditLes(null); }} title={editLes ? 'Edit Lesson' : 'Author Lesson'} maxWidth="max-w-2xl">
+      <ModalDialog isOpen={Boolean(editLes)} onClose={() => setEditLes(null)} title="Edit Lesson" maxWidth="max-w-2xl">
         <form onSubmit={handleSaveLes} className="space-y-4 text-xs">
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block font-semibold mb-1.5">Module</label>
@@ -876,6 +1126,245 @@ export function InstructorCourseStudioPage() {
         </form>
       </ModalDialog>
 
+      <ModalDialog
+        isOpen={curriculumOpen}
+        onClose={() => { if (!curriculumSaving) setCurriculumOpen(false); }}
+        title={`Build curriculum${course?.title ? ` — ${course.title}` : ''}`}
+        maxWidth="max-w-5xl"
+      >
+        <div className="space-y-5 text-xs">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-blue-800">
+            Add several modules and topics, then optionally configure an end-of-module quiz for each module. Changes are saved to the selected course.
+          </div>
+          {curriculumDrafts.map((draft, moduleIndex) => {
+            const isModuleSaved = Boolean(draft.savedModuleId);
+            const quiz = draft.quiz;
+            const selectedQuestionIds = new Set(quiz.questionIds.map(Number));
+            const updateQuizQuestions = (questionId, checked) => {
+              const nextIds = new Set(quiz.questionIds.map(Number));
+              if (checked) nextIds.add(Number(questionId));
+              else nextIds.delete(Number(questionId));
+              updateCurriculumQuiz(draft.draftId, { questionIds: [...nextIds] });
+            };
+
+            return (
+              <section key={draft.draftId} className="rounded-xl border border-slate-200 bg-white">
+                <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <span className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">{moduleIndex + 1}</span>
+                    <div className="w-full space-y-3">
+                      <div>
+                        <label className="mb-1.5 block font-semibold">Module title</label>
+                        <input
+                          required
+                          value={draft.title}
+                          disabled={isModuleSaved}
+                          onChange={(event) => updateCurriculumModule(draft.draftId, { title: event.target.value })}
+                          placeholder="e.g., Module 1: Network Fundamentals"
+                          className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px]">
+                        <div>
+                          <label className="mb-1.5 block font-semibold">Module description</label>
+                          <textarea
+                            rows={2}
+                            value={draft.description}
+                            disabled={isModuleSaved}
+                            onChange={(event) => updateCurriculumModule(draft.draftId, { description: event.target.value })}
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block font-semibold">Estimated minutes</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={draft.estimatedMinutes}
+                            disabled={isModuleSaved}
+                            onChange={(event) => updateCurriculumModule(draft.draftId, { estimatedMinutes: Number(event.target.value) })}
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                          />
+                        </div>
+                      </div>
+                      {isModuleSaved && <p className="font-semibold text-emerald-700">Module saved</p>}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isModuleSaved || curriculumSaving}
+                    onClick={() => setCurriculumDrafts((drafts) => drafts.filter((item) => item.draftId !== draft.draftId))}
+                    className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
+                    aria-label={`Remove module ${moduleIndex + 1}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-4 p-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-900">Topics / lessons</h3>
+                        <p className="mt-0.5 text-[11px] text-slate-500">Add the learning content and optional attachment for each topic.</p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isModuleSaved || curriculumSaving}
+                        onClick={() => addCurriculumLesson(draft.draftId)}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Add topic
+                      </button>
+                    </div>
+                    {draft.lessons.length === 0 && (
+                      <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-slate-500">No topics added yet.</p>
+                    )}
+                    {draft.lessons.map((lesson, lessonIndex) => {
+                      const isLessonSaved = draft.savedLessonDraftIds.includes(lesson.draftId);
+                      return (
+                        <div key={lesson.draftId} className="space-y-3 rounded-lg border border-slate-200 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-semibold text-slate-800">Topic {moduleIndex + 1}.{lessonIndex + 1}</p>
+                            <div className="flex items-center gap-2">
+                              {isLessonSaved && <span className="font-semibold text-emerald-700">Saved</span>}
+                              <button
+                                type="button"
+                                disabled={isLessonSaved || curriculumSaving}
+                                onClick={() => updateCurriculumModule(draft.draftId, {
+                                  lessons: draft.lessons.filter((item) => item.draftId !== lesson.draftId)
+                                })}
+                                className="rounded p-1 text-slate-400 hover:text-rose-600 disabled:opacity-40"
+                                aria-label={`Remove topic ${moduleIndex + 1}.${lessonIndex + 1}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div>
+                              <label className="mb-1.5 block font-semibold">Topic title</label>
+                              <input required value={lesson.title} disabled={isLessonSaved} onChange={(event) => updateCurriculumLesson(draft.draftId, lesson.draftId, { title: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100" />
+                            </div>
+                            <div>
+                              <label className="mb-1.5 block font-semibold">Topic type</label>
+                              <select value={lesson.lessonType} disabled={isLessonSaved} onChange={(event) => updateCurriculumLesson(draft.draftId, lesson.draftId, { lessonType: event.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100">
+                                <option value="reading">Reading</option><option value="video">Video</option><option value="laboratory">Laboratory</option><option value="coding_exercise">Coding exercise</option><option value="interactive">Interactive</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="mb-1.5 block font-semibold">Topic content (HTML)</label>
+                            <textarea rows={3} required value={lesson.contentHtml} disabled={isLessonSaved} onChange={(event) => updateCurriculumLesson(draft.draftId, lesson.draftId, { contentHtml: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-[11px] disabled:bg-slate-100" />
+                          </div>
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div>
+                              <label className="mb-1.5 block font-semibold">Estimated minutes</label>
+                              <input type="number" min="5" value={lesson.estimatedMinutes} disabled={isLessonSaved} onChange={(event) => updateCurriculumLesson(draft.draftId, lesson.draftId, { estimatedMinutes: Number(event.target.value) })} className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100" />
+                            </div>
+                            <div>
+                              <label className="mb-1.5 block font-semibold">Attach learning material (optional)</label>
+                              <input type="file" accept=".pdf,.docx,.pptx,.ppt,.xlsx,.zip,.txt,.png,.jpg" disabled={isLessonSaved} onChange={(event) => updateCurriculumLesson(draft.draftId, lesson.draftId, { file: event.target.files?.[0] || null })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 disabled:bg-slate-100" />
+                              {lesson.file && <p className="mt-1 text-[11px] text-slate-500">{lesson.file.name}</p>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+                    <label className="flex cursor-pointer items-center gap-2 font-semibold text-slate-800">
+                      <input
+                        type="checkbox"
+                        checked={quiz.enabled}
+                        disabled={Boolean(quiz.savedAssessmentId) || curriculumSaving}
+                        onChange={(event) => updateCurriculumQuiz(draft.draftId, { enabled: event.target.checked })}
+                        className="rounded"
+                      />
+                      Add an end-of-module quiz
+                    </label>
+                    {quiz.enabled && (
+                      <div className="mt-4 space-y-3">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-1.5 block font-semibold">Quiz title</label>
+                            <input value={quiz.title} disabled={Boolean(quiz.savedAssessmentId)} onChange={(event) => updateCurriculumQuiz(draft.draftId, { title: event.target.value })} placeholder={`${draft.title || 'Module'} Quiz`} className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100" />
+                          </div>
+                          <div>
+                            <label className="mb-1.5 block font-semibold">Class section</label>
+                            <select required value={quiz.classId} disabled={Boolean(quiz.savedAssessmentId)} onChange={(event) => updateCurriculumQuiz(draft.draftId, { classId: event.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100">
+                              <option value="">— Select class —</option>
+                              {courseClasses.map((classSection) => <option key={classSection.id} value={classSection.id}>{classSection.sectionCode}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                        {courseClasses.length === 0 && <p className="text-amber-800">No class section is assigned to this course yet. An academic administrator must assign one before a quiz can be created.</p>}
+                        <div>
+                          <label className="mb-1.5 block font-semibold">Instructions</label>
+                          <textarea required rows={2} minLength={5} value={quiz.instructions} disabled={Boolean(quiz.savedAssessmentId)} onChange={(event) => updateCurriculumQuiz(draft.draftId, { instructions: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          <div><label className="mb-1.5 block font-semibold">Close date</label><input required type="date" value={quiz.closeDate} disabled={Boolean(quiz.savedAssessmentId)} onChange={(event) => updateCurriculumQuiz(draft.draftId, { closeDate: event.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-2 disabled:bg-slate-100" /></div>
+                          <div><label className="mb-1.5 block font-semibold">Time limit (min)</label><input type="number" min="5" max="360" value={quiz.timeLimitMinutes} disabled={Boolean(quiz.savedAssessmentId)} onChange={(event) => updateCurriculumQuiz(draft.draftId, { timeLimitMinutes: Number(event.target.value) })} className="w-full rounded-lg border border-slate-300 px-2 py-2 disabled:bg-slate-100" /></div>
+                          <div><label className="mb-1.5 block font-semibold">Max score</label><input type="number" min="1" max="1000" value={quiz.maxScore} disabled={Boolean(quiz.savedAssessmentId)} onChange={(event) => updateCurriculumQuiz(draft.draftId, { maxScore: Number(event.target.value) })} className="w-full rounded-lg border border-slate-300 px-2 py-2 disabled:bg-slate-100" /></div>
+                          <div><label className="mb-1.5 block font-semibold">Attempts</label><input type="number" min="1" max="10" value={quiz.maxAttempts} disabled={Boolean(quiz.savedAssessmentId)} onChange={(event) => updateCurriculumQuiz(draft.draftId, { maxAttempts: Number(event.target.value) })} className="w-full rounded-lg border border-slate-300 px-2 py-2 disabled:bg-slate-100" /></div>
+                        </div>
+                        <div>
+                          <p className="mb-2 font-semibold">Select questions from this course</p>
+                          {questionSets.length > 0 && (
+                            <div className="mb-3 flex flex-wrap gap-2">
+                              {questionSets.map((set) => (
+                                <button
+                                  key={set.id}
+                                  type="button"
+                                  disabled={Boolean(quiz.savedAssessmentId)}
+                                  onClick={() => updateCurriculumQuiz(draft.draftId, {
+                                    questionIds: [...new Set([...quiz.questionIds.map(Number), ...(set.questions || []).map((question) => Number(question.id))])]
+                                  })}
+                                  className="rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+                                >
+                                  Add set: {set.title} ({set.questions?.length || 0})
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {curriculumQuestions.length > 0 ? (
+                            <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+                              {curriculumQuestions.map((question) => (
+                                <label key={question.id} className="flex items-start gap-2 rounded p-1.5 hover:bg-slate-50">
+                                  <input type="checkbox" checked={selectedQuestionIds.has(Number(question.id))} disabled={Boolean(quiz.savedAssessmentId)} onChange={(event) => updateQuizQuestions(question.id, event.target.checked)} className="mt-0.5 rounded" />
+                                  <span className="line-clamp-2 text-slate-700">{question.prompt}</span>
+                                </label>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-slate-500">
+                              No questions are available for this course yet. Add questions to a course question bank before configuring its quiz.
+                            </p>
+                          )}
+                          <p className="mt-1 text-[11px] text-slate-500">{quiz.questionIds.length} questions selected. New quizzes are saved as drafts so they can be reviewed before publishing.</p>
+                          {quiz.savedAssessmentId && <p className="mt-1 font-semibold text-emerald-700">Quiz saved as a draft.</p>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            );
+          })}
+          <button type="button" disabled={curriculumSaving} onClick={addCurriculumModule} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-400 px-4 py-2.5 font-semibold text-slate-700 hover:border-blue-400 hover:text-blue-700 disabled:opacity-50">
+            <Plus className="h-4 w-4" /> Add another module
+          </button>
+          <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+            <button type="button" disabled={curriculumSaving} onClick={() => setCurriculumOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2.5 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Close</button>
+            <button type="button" disabled={curriculumSaving || !course} onClick={saveCurriculum} className="rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+              {curriculumSaving ? 'Saving curriculum…' : 'Save curriculum'}
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
+
       {/* Add Course Modal */}
       <ModalDialog isOpen={courseOpen} onClose={() => { setCourseOpen(false); setNewCourseResult(null); }} title="➕ Add New Course" maxWidth="max-w-xl">
         {newCourseResult ? (
@@ -888,12 +1377,21 @@ export function InstructorCourseStudioPage() {
             <div className="p-4 rounded-xl bg-blue-50 border-2 border-blue-200 text-center">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-1">Next Step</p>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Go to the <strong>🔑 Join Code</strong> tab after a class section is assigned to this course to generate a join code for students.
+                Add modules, topics, and end-of-module quizzes in the curriculum builder. A class section is required to create a quiz.
               </p>
             </div>
-            <button type="button" onClick={() => { setCourseOpen(false); setNewCourseResult(null); }}
+            <button type="button" onClick={() => {
+              setCourseOpen(false);
+              setNewCourseResult(null);
+              setCurriculumDrafts([createCurriculumModule(++curriculumDraftId.current)]);
+              setCurriculumOpen(true);
+            }}
               className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">
-              Done
+              Build curriculum
+            </button>
+            <button type="button" onClick={() => { setCourseOpen(false); setNewCourseResult(null); }}
+              className="w-full py-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded-lg">
+              Done for now
             </button>
           </div>
         ) : (
@@ -1495,6 +1993,9 @@ export function InstructorSubmissionsPage() {
 export function InstructorAssessmentsPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedCourseId = Number(searchParams.get('courseId'));
+  const requestedModuleId = Number(searchParams.get('moduleId'));
   const [tab, setTab] = useState('assessments');
   const [aOpen, setAOpen] = useState(false);
   const [qOpen, setQOpen] = useState(false);
@@ -1507,8 +2008,7 @@ export function InstructorAssessmentsPage() {
   const [pickerSourceTab, setPickerSourceTab] = useState('sets');
   const [pickerSelected, setPickerSelected] = useState([]);
 
-  const emptyA = { classId:'', courseId:'', title:'', assessmentType:'quiz', instructions:'', timeLimitMinutes:45, maxScore:100, openDate:'', closeDate:'', maxAttempts:1, randomizeQuestions:false, autoPublishResults:true, publicationStatus:'draft', questionIds:[] };
-  const [aForm, setAForm] = useState(emptyA);
+  const [aForm, setAForm] = useState(EMPTY_ASSESSMENT_FORM);
   const [qForm, setQForm] = useState({ questionBankId:'', courseId:'', topic:'', questionType:'multiple_choice', difficulty:'Medium', prompt:'', points:10, options:[{optionText:'Option A',isCorrect:true},{optionText:'Option B',isCorrect:false},{optionText:'Option C',isCorrect:false}] });
   const [bForm, setBForm] = useState({ courseId:'', title:'', topic:'', description:'' });
 
@@ -1516,7 +2016,7 @@ export function InstructorAssessmentsPage() {
   const { data: questionSetsData } = useQuery({ queryKey:['question-sets'], queryFn:()=>lmsApi.listQuestionSets() });
   const { data: assessData } = useQuery({ queryKey:['assessments'], queryFn:()=>lmsApi.listAssessments() });
   const { data: classesData } = useQuery({ queryKey:['classes'], queryFn:lmsApi.listClasses });
-  const { data: coursesData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
+  const { data: coursesData, isLoading: isCoursesLoading } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
 
   const banks = banksData?.data?.questionBanks||[];
   const questionSets = questionSetsData?.data?.questionSets||[];
@@ -1525,10 +2025,38 @@ export function InstructorAssessmentsPage() {
   const allCourses = coursesData?.data?.courses||[];
   const attachedQuestionIds = new Set((pickerOpen?.assessmentQuestions||[]).map(link=>link.questionId));
 
+  useEffect(() => {
+    if (!searchParams.has('courseId') && !searchParams.has('moduleId')) return;
+    if (isCoursesLoading) return;
+
+    const course = allCourses.find((item) => Number(item.id) === requestedCourseId);
+    const module = course?.modules?.find((item) => Number(item.id) === requestedModuleId);
+    if (!course || !module) {
+      addToast('Could not find that course and module. Select a module and try again.', 'error');
+      setSearchParams({}, { replace: true });
+      return;
+    }
+
+    setAForm({
+      ...EMPTY_ASSESSMENT_FORM,
+      courseId: String(course.id),
+      moduleId: String(module.id),
+      title: `${module.title} Quiz`,
+      instructions: `End-of-module quiz for ${module.title}.`
+    });
+    setAOpen(true);
+    setSearchParams({}, { replace: true });
+  }, [addToast, allCourses, isCoursesLoading, requestedCourseId, requestedModuleId, searchParams, setSearchParams]);
+
   const handleSaveA = async (e) => {
     e.preventDefault();
     try {
-      const payload = { ...aForm, classId:Number(aForm.classId), courseId:Number(aForm.courseId) };
+      const payload = {
+        ...aForm,
+        classId:Number(aForm.classId),
+        courseId:Number(aForm.courseId),
+        moduleId:aForm.moduleId ? Number(aForm.moduleId) : null
+      };
       if (editA) {
         await lmsApi.updateAssessment(editA.id, payload);
         addToast('Assessment updated.');
@@ -1577,7 +2105,7 @@ export function InstructorAssessmentsPage() {
     catch (err) { addToast(extractErrorMessage(err),'error'); }
   };
 
-  const openEditA = (a) => { setAForm({ classId:a.classId||'', courseId:a.courseId||'', title:a.title, assessmentType:a.assessmentType, instructions:a.instructions||'', timeLimitMinutes:a.timeLimitMinutes||45, maxScore:a.maxScore||100, openDate:a.openDate?a.openDate.slice(0,10):'', closeDate:a.closeDate?a.closeDate.slice(0,10):'', maxAttempts:a.maxAttempts||1, randomizeQuestions:a.randomizeQuestions||false, autoPublishResults:a.autoPublishResults||true, publicationStatus:a.publicationStatus||'published', questionIds:[] }); setEditA(a); };
+  const openEditA = (a) => { setAForm({ ...EMPTY_ASSESSMENT_FORM, classId:a.classId||'', courseId:a.courseId||'', moduleId:a.moduleId||'', title:a.title, assessmentType:a.assessmentType, instructions:a.instructions||'', timeLimitMinutes:a.timeLimitMinutes||45, maxScore:a.maxScore||100, openDate:a.openDate?a.openDate.slice(0,10):'', closeDate:a.closeDate?a.closeDate.slice(0,10):'', maxAttempts:a.maxAttempts||1, randomizeQuestions:a.randomizeQuestions||false, autoPublishResults:a.autoPublishResults||true, publicationStatus:a.publicationStatus||'published', questionIds:[] }); setEditA(a); };
 
   const diffCls = { Easy:'bg-emerald-50 text-emerald-700 border-emerald-200', Medium:'bg-amber-50 text-amber-700 border-amber-200', Hard:'bg-rose-50 text-rose-700 border-rose-200' };
 
@@ -1586,12 +2114,18 @@ export function InstructorAssessmentsPage() {
       <div className="grid grid-cols-2 gap-3">
         <div><label className="block font-semibold mb-1.5">Class</label>
           <select required value={aForm.classId} onChange={e=>setAForm(p=>({...p,classId:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
-            <option value="">— Select —</option>{allClasses.map(c=><option key={c.id} value={c.id}>{c.sectionCode}</option>)}
+            <option value="">— Select —</option>{allClasses.filter(c=>String(c.courseOffering?.courseId)===String(aForm.courseId)).map(c=><option key={c.id} value={c.id}>{c.sectionCode}</option>)}
           </select></div>
         <div><label className="block font-semibold mb-1.5">Course</label>
-          <select required value={aForm.courseId} onChange={e=>setAForm(p=>({...p,courseId:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select required value={aForm.courseId} onChange={e=>setAForm(p=>({...p,courseId:e.target.value,classId:'',moduleId:''}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="">— Select —</option>{allCourses.map(c=><option key={c.id} value={c.id}>{c.code}</option>)}
           </select></div>
+      </div>
+      <div><label className="block font-semibold mb-1.5">Module (optional)</label>
+        <select value={aForm.moduleId} onChange={e=>setAForm(p=>({...p,moduleId:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white" disabled={!aForm.courseId}>
+          <option value="">— Not linked to a module —</option>
+          {(allCourses.find(course=>String(course.id)===String(aForm.courseId))?.modules||[]).map(module=><option key={module.id} value={module.id}>{module.title}</option>)}
+        </select>
       </div>
       <div><label className="block font-semibold mb-1.5">Title</label>
         <input required value={aForm.title} onChange={e=>setAForm(p=>({...p,title:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/>
@@ -1640,7 +2174,7 @@ export function InstructorAssessmentsPage() {
         <div className="flex gap-2 flex-wrap">
           <button type="button" onClick={()=>setBOpen(true)} className="self-start inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg"><Plus className="w-3.5 h-3.5"/> New Bank</button>
           <button type="button" onClick={()=>setQOpen(true)} className="self-start inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg"><Plus className="w-3.5 h-3.5"/> Add Question</button>
-          <button type="button" onClick={()=>{setAForm(emptyA);setAOpen(true);}} className="self-start inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg"><Plus className="w-4 h-4"/> New Assessment</button>
+          <button type="button" onClick={()=>{setAForm(EMPTY_ASSESSMENT_FORM);setAOpen(true);}} className="self-start inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg"><Plus className="w-4 h-4"/> New Assessment</button>
         </div>
       </div>
 
@@ -2073,16 +2607,109 @@ export function InstructorClassManagementPage() {
   const [activeSession, setActiveSession] = useState(null); // session being marked
   const [attendRecords, setAttendRecords] = useState({}); // { studentId: 'present'|'absent'|'late'|'excused' }
   const [progressStudent, setProgressStudent] = useState(null);
+  const [createClassOpen, setCreateClassOpen] = useState(false);
+  const [createdClassJoinCode, setCreatedClassJoinCode] = useState(null);
+  const [newClassForm, setNewClassForm] = useState({
+    courseOfferingId: '',
+    sectionCode: '',
+    name: '',
+    room: '',
+    schedule: '',
+    capacity: 40
+  });
 
   const { data: clsData, isLoading: clsLoading } = useQuery({ queryKey:['classes'], queryFn:lmsApi.listClasses });
+  const { data: offeringsData, isLoading: offeringsLoading } = useQuery({
+    queryKey:['course-offerings'],
+    queryFn:lmsApi.listOfferings
+  });
   const { data: detailData, isLoading: detailLoading } = useQuery({ queryKey:['class',selId], queryFn:()=>lmsApi.getClassById(selId), enabled:Boolean(selId) });
+  const { data: pendingData, isLoading: pendingLoading } = useQuery({
+    queryKey:['pending-enrollments', selId],
+    queryFn:() => lmsApi.getPendingEnrollments(selId),
+    enabled:Boolean(selId)
+  });
   const { data: attendData, refetch: refetchAttend } = useQuery({ queryKey:['attendance',selId], queryFn:()=>lmsApi.listAttendanceSessions({ classId:selId }), enabled:Boolean(selId) });
   const { data: attendSummaryData } = useQuery({ queryKey:['attendance-summary',selId], queryFn:()=>lmsApi.getAttendanceSummary({ classId:selId }), enabled:Boolean(selId) });
 
   const classes = clsData?.data?.classes||[];
+  const offerings = (offeringsData?.data?.offerings||[]).filter((offering) => offering.status === 'published');
   const cls = detailData?.data?.classSection;
+  const pendingEnrollments = pendingData?.data?.pending || [];
   const sessions = attendData?.data?.sessions||[];
   const attendSummary = attendSummaryData?.data?.summary||[];
+
+  useEffect(() => {
+    if (!newClassForm.courseOfferingId && offerings.length > 0) {
+      setNewClassForm((form) => ({ ...form, courseOfferingId: String(offerings[0].id) }));
+    }
+  }, [newClassForm.courseOfferingId, offerings]);
+
+  const handleCreateClass = async (e) => {
+    e.preventDefault();
+    try {
+      const result = await lmsApi.createInstructorClass({
+        ...newClassForm,
+        courseOfferingId: Number(newClassForm.courseOfferingId),
+        capacity: Number(newClassForm.capacity)
+      });
+      const createdClass = result.data.classSection;
+      addToast('Class section created and assigned to you.');
+      setCreatedClassJoinCode({
+        sectionCode: createdClass.sectionCode,
+        joinCode: createdClass.joinCode
+      });
+      setCreateClassOpen(false);
+      setNewClassForm({
+        courseOfferingId: String(offerings[0]?.id || ''),
+        sectionCode: '',
+        name: '',
+        room: '',
+        schedule: '',
+        capacity: 40
+      });
+      setSelId(createdClass.id);
+      queryClient.invalidateQueries({ queryKey:['classes'] });
+      queryClient.invalidateQueries({ queryKey:['class', createdClass.id] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleApproveEnrollment = async (membershipId) => {
+    try {
+      await lmsApi.approveEnrollment(membershipId);
+      addToast('Student enrollment approved.');
+      queryClient.invalidateQueries({ queryKey:['pending-enrollments', selId] });
+      queryClient.invalidateQueries({ queryKey:['class', selId] });
+      queryClient.invalidateQueries({ queryKey:['classes'] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleRejectEnrollment = async (membershipId) => {
+    try {
+      await lmsApi.rejectEnrollment(membershipId, { reason: 'Enrollment request declined by instructor.' });
+      addToast('Enrollment request rejected.');
+      queryClient.invalidateQueries({ queryKey:['pending-enrollments', selId] });
+      queryClient.invalidateQueries({ queryKey:['class', selId] });
+      queryClient.invalidateQueries({ queryKey:['classes'] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
+
+  const handleGenerateClassJoinCode = async () => {
+    try {
+      await lmsApi.generateJoinCode(selId, { enable: true });
+      addToast('Class join code generated.');
+      queryClient.invalidateQueries({ queryKey:['class', selId] });
+      queryClient.invalidateQueries({ queryKey:['classes'] });
+    } catch (err) {
+      addToast(extractErrorMessage(err), 'error');
+    }
+  };
 
   const handleIssueCert = async () => {
     if (!certStudent) return;
@@ -2130,7 +2757,34 @@ export function InstructorClassManagementPage() {
         <Badge label="Class Management" color="blue" icon={Users}/>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Class Management</h1>
         <p className="text-sm text-slate-500 mt-1">View assigned class sections, rosters, grade weights, and issue certificates.</p>
+        <button
+          type="button"
+          onClick={() => setCreateClassOpen(true)}
+          disabled={offeringsLoading}
+          className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg"
+        >
+          <Plus className="w-4 h-4"/> Create Class
+        </button>
       </div>
+
+      {createdClassJoinCode && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-blue-900">Share this class join code</p>
+              <p className="mt-1 text-xs text-blue-800">
+                {createdClassJoinCode.sectionCode} · Students use this code on their dashboard to request enrollment. You will need to approve their requests.
+              </p>
+              <p className="mt-2 font-mono text-2xl font-black tracking-[0.25em] text-blue-900">
+                {createdClassJoinCode.joinCode}
+              </p>
+            </div>
+            <button type="button" onClick={() => setCreatedClassJoinCode(null)} className="text-xs font-semibold text-blue-700 hover:text-blue-900">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {clsLoading?<LoadingState/>:classes.length===0?(<div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center"><Users className="w-10 h-10 text-slate-300 mx-auto mb-3"/><p className="text-sm font-semibold text-slate-500">No classes assigned to you yet.</p></div>):(
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -2162,6 +2816,22 @@ export function InstructorClassManagementPage() {
                 <div className="text-center"><p className="text-lg font-bold text-emerald-600">{cls.gradeCategories?.length||0}</p><p className="text-slate-500">Grade Cats</p></div>
               </div>
             </div>
+            <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 p-4">
+              {cls.joinCodeEnabled && cls.joinCode ? (
+                <>
+                  <p className="text-xs font-semibold text-blue-900">Student join code</p>
+                  <p className="mt-1 font-mono text-2xl font-black tracking-[0.25em] text-blue-900">{cls.joinCode}</p>
+                  <p className="mt-1 text-[11px] text-blue-800">Students can enter this code on their dashboard to request enrollment. Approve their request below.</p>
+                </>
+              ) : (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <p className="text-xs text-blue-900">Generate a join code so students can request to join this section.</p>
+                  <button type="button" onClick={handleGenerateClassJoinCode} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">
+                    Generate Join Code
+                  </button>
+                </div>
+              )}
+            </div>
             {/* Grade Categories summary */}
             {(cls.gradeCategories||[]).length>0&&<div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{(cls.gradeCategories||[]).map(cat=>(
               <div key={cat.id} className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs">
@@ -2169,6 +2839,35 @@ export function InstructorClassManagementPage() {
                 <p className="text-blue-600 font-extrabold text-base mt-0.5">{cat.weightPercent}%</p>
               </div>
             ))}</div>}
+          </div>
+
+          <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
+            <div className="px-5 py-4 bg-amber-50 border-b border-amber-100">
+              <h2 className="text-sm font-bold text-amber-900">Enrollment Requests ({pendingEnrollments.length})</h2>
+              <p className="mt-1 text-xs text-amber-800">Students who joined with your class code need your approval.</p>
+            </div>
+            {pendingLoading ? <div className="p-5"><LoadingState/></div> : pendingEnrollments.length === 0 ? (
+              <p className="px-5 py-4 text-xs text-slate-500">No pending requests for this class.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {pendingEnrollments.map((request) => (
+                  <div key={request.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4">
+                    <div className="text-xs">
+                      <p className="font-semibold text-slate-900">{request.student?.firstName} {request.student?.lastName}</p>
+                      <p className="text-slate-500">{request.student?.email}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => handleApproveEnrollment(request.id)} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold">
+                        Approve
+                      </button>
+                      <button type="button" onClick={() => handleRejectEnrollment(request.id)} className="px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold">
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Tab switcher */}
@@ -2272,6 +2971,100 @@ export function InstructorClassManagementPage() {
           <div><label className="block font-semibold mb-1.5">Session Date</label><input required type="date" value={sessionForm.sessionDate} onChange={e=>setSessionForm({...sessionForm,sessionDate:e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
           <div><label className="block font-semibold mb-1.5">Topic / Lesson</label><input value={sessionForm.topic} onChange={e=>setSessionForm({...sessionForm,topic:e.target.value})} placeholder="e.g., Module 3 Lab — OSPF" className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
           <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">Create Session</button>
+        </form>
+      </ModalDialog>
+
+      <ModalDialog isOpen={createClassOpen} onClose={() => setCreateClassOpen(false)} title="Create Class Section">
+        <form onSubmit={handleCreateClass} className="space-y-3 text-xs">
+          <p className="text-slate-500">
+            This creates a real section under an existing published course offering, assigns it to you, and generates a join code for student enrollment requests.
+          </p>
+          <div>
+            <label className="block font-semibold mb-1">Course Offering</label>
+            <select
+              required
+              value={newClassForm.courseOfferingId}
+              onChange={(e) => setNewClassForm((form) => ({ ...form, courseOfferingId: e.target.value }))}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+            >
+              {offerings.map((offering) => (
+                <option key={offering.id} value={offering.id}>
+                  {offering.offeringCode} — {offering.titleOverride || offering.course?.title}
+                  {offering.semester?.name ? ` (${offering.semester.name})` : ''}
+                </option>
+              ))}
+            </select>
+            {offerings.length === 0 && (
+              <p className="mt-1 text-amber-700">No published course offerings are available. An administrator must create one first.</p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Section Code</label>
+              <input
+                required
+                minLength={2}
+                maxLength={60}
+                value={newClassForm.sectionCode}
+                onChange={(e) => setNewClassForm((form) => ({ ...form, sectionCode: e.target.value }))}
+                placeholder="e.g. IT-401-A"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Capacity</label>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                required
+                value={newClassForm.capacity}
+                onChange={(e) => setNewClassForm((form) => ({ ...form, capacity: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">Section Name</label>
+            <input
+              required
+              minLength={3}
+              maxLength={150}
+              value={newClassForm.name}
+              onChange={(e) => setNewClassForm((form) => ({ ...form, name: e.target.value }))}
+              placeholder="e.g. IT-401 Section A"
+              className="w-full px-3 py-2 rounded-lg border border-slate-300"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Room / Lab</label>
+              <input
+                maxLength={80}
+                value={newClassForm.room}
+                onChange={(e) => setNewClassForm((form) => ({ ...form, room: e.target.value }))}
+                placeholder="Optional"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Schedule</label>
+              <input
+                maxLength={150}
+                value={newClassForm.schedule}
+                onChange={(e) => setNewClassForm((form) => ({ ...form, schedule: e.target.value }))}
+                placeholder="Optional"
+                className="w-full px-3 py-2 rounded-lg border border-slate-300"
+              />
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={offerings.length === 0}
+            className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-lg"
+          >
+            Create Class
+          </button>
         </form>
       </ModalDialog>
 

@@ -361,6 +361,8 @@ export function StudentDashboardPage() {
       setJoinResult({ success: true, message: res.message, classSection: res.data?.classSection });
       setJoinCode('');
       queryClient.invalidateQueries({ queryKey: ['dashboard', 'student'] });
+      queryClient.invalidateQueries({ queryKey: ['enrollments'] });
+      queryClient.invalidateQueries({ queryKey: ['courses', 'catalog'] });
     } catch (err) {
       setJoinResult({ success: false, message: extractErrorMessage(err) });
     } finally { setJoinLoading(false); }
@@ -451,7 +453,7 @@ export function StudentDashboardPage() {
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex-1">
             <h3 className="text-sm font-bold text-blue-900">🔑 Join a Class</h3>
-            <p className="text-xs text-blue-700 mt-0.5">Enter the join code given by your instructor to enroll in a class instantly.</p>
+            <p className="text-xs text-blue-700 mt-0.5">Enter the join code given by your instructor to request enrollment. Your instructor must approve the request.</p>
           </div>
           <form onSubmit={handleJoinClass} className="flex gap-2 w-full sm:w-auto">
             <input
@@ -689,7 +691,7 @@ export function StudentCatalogPage() {
           </>
         ) : (
           <>
-            <strong>Your academic placement has not been assigned yet.</strong> Contact the registrar to set your program, year level, and section before enrolling.
+            <strong>Your academic placement is not set for this term.</strong> To request a place in a class, ask the instructor for its join code and enter it above. Direct catalog enrollment requires an academic placement.
           </>
         )}
       </div>
@@ -748,6 +750,17 @@ export function StudentCatalogPage() {
                     >
                       {cls.studentMembershipStatus === 'completed' ? 'Completed' : 'Open My Class'}
                     </Link>
+                  ) : cls.joinCodeEnabled ? (
+                    <Link
+                      to="/student/dashboard"
+                      className="shrink-0 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg"
+                    >
+                      Enter Join Code
+                    </Link>
+                  ) : !currentPlacement ? (
+                    <span className="shrink-0 px-3 py-1.5 text-slate-600 bg-slate-200 font-semibold rounded-lg">
+                      Ask instructor for code
+                    </span>
                   ) : (
                     <button
                       type="button"

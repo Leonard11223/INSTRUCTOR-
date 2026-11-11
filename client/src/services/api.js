@@ -89,6 +89,7 @@ export const lmsApi = {
   listClasses: () => apiClient.get('/classes').then((r) => r.data),
   getClassById: (id) => apiClient.get(`/classes/${id}`).then((r) => r.data),
   createClass: (data) => apiClient.post('/classes', data).then((r) => r.data),
+  createInstructorClass: (data) => apiClient.post('/classes/instructor', data).then((r) => r.data),
   assignInstructor: (classId, data) => apiClient.post(`/classes/${classId}/instructors`, data).then((r) => r.data),
   assignTa: (classId, data) => apiClient.post(`/classes/${classId}/teaching-assistants`, data).then((r) => r.data),
   listEnrollments: (params) => apiClient.get('/enrollments', { params }).then((r) => r.data),

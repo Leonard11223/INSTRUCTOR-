@@ -13,6 +13,7 @@ const {
   QuestionOption,
   QuestionSet,
   QuestionSetQuestion,
+  Module,
   Assessment,
   AssessmentQuestion,
   AssessmentAttempt,
@@ -980,10 +981,11 @@ async function createQuestion(req, res, next) {
 
 async function listAssessments(req, res, next) {
   try {
-    const { classId, courseId } = req.query;
+    const { classId, courseId, moduleId } = req.query;
     const where = {};
     if (classId) where.classId = Number(classId);
     if (courseId) where.courseId = Number(courseId);
+    if (moduleId) where.moduleId = Number(moduleId);
 
     if (req.user.primaryRole === 'student') {
       where.publicationStatus = ['published', 'closed'];
@@ -1021,7 +1023,17 @@ async function createAssessment(req, res, next) {
   const t = await sequelize.transaction();
   try {
     const payload = assessmentSchema.parse(req.body);
-    await verifyClassAccess(req.user, payload.classId, { allowAdmin: true, allowInstructor: true });
+    const { classSection } = await verifyClassAccess(req.user, payload.classId, { allowAdmin: true, allowInstructor: true });
+    if (Number(classSection.courseOffering.courseId) !== payload.courseId) {
+      throw new AppError('The selected class does not belong to this course.', 400);
+    }
+    if (payload.moduleId) {
+      const module = await Module.findOne({
+        where: { id: payload.moduleId, courseId: payload.courseId },
+        transaction: t
+      });
+      if (!module) throw new AppError('The selected module does not belong to this course.', 400);
+    }
 
     const questionIds = [...new Set(payload.questionIds)];
     if (payload.publicationStatus === 'published' && questionIds.length === 0) {
@@ -1565,6 +1577,23 @@ async function updateAssessment(req, res, next) {
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+
+    if (req.body.moduleId !== undefined) {
+      const moduleId = req.body.moduleId === null || req.body.moduleId === ''
+        ? null
+        : Number(req.body.moduleId);
+      if (moduleId !== null) {
+        if (!Number.isInteger(moduleId) || moduleId < 1) {
+          throw new AppError('moduleId must be a positive integer or null.', 400);
+        }
+        const module = await Module.findOne({
+          where: { id: moduleId, courseId: assessment.courseId },
+          transaction: t
+        });
+        if (!module) throw new AppError('The selected module does not belong to this course.', 400);
+      }
+      updates.moduleId = moduleId;
     }
 
     let questionIdsToAdd = [];
