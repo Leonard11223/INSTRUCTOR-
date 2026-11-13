@@ -112,6 +112,8 @@ export const lmsApi = {
   updateLesson: (id, data) => apiClient.put(`/lessons/${id}`, data).then((r) => r.data),
   deleteLesson: (id) => apiClient.delete(`/lessons/${id}`).then((r) => r.data),
   listResources: (params) => apiClient.get('/resources', { params }).then((r) => r.data),
+  getResourcePreview: (id, params) =>
+    apiClient.get(`/resources/${id}/preview`, { params, responseType: 'text' }).then((r) => r.data),
   createResource: (formData) =>
     apiClient.post('/resources', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data),
   updateLessonProgress: (data) => apiClient.post('/progress/lessons', data).then((r) => r.data),

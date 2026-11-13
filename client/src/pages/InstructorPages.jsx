@@ -2610,7 +2610,9 @@ export function InstructorClassManagementPage() {
   const [createClassOpen, setCreateClassOpen] = useState(false);
   const [createdClassJoinCode, setCreatedClassJoinCode] = useState(null);
   const [newClassForm, setNewClassForm] = useState({
-    courseOfferingId: '',
+    courseId: '',
+    academicYearId: '',
+    semesterId: '',
     sectionCode: '',
     name: '',
     room: '',
@@ -2619,9 +2621,13 @@ export function InstructorClassManagementPage() {
   });
 
   const { data: clsData, isLoading: clsLoading } = useQuery({ queryKey:['classes'], queryFn:lmsApi.listClasses });
-  const { data: offeringsData, isLoading: offeringsLoading } = useQuery({
-    queryKey:['course-offerings'],
-    queryFn:lmsApi.listOfferings
+  const { data: coursesData, isLoading: coursesLoading } = useQuery({
+    queryKey:['courses', 'instructor-class-options'],
+    queryFn:() => lmsApi.listCourses({ publicationStatus: 'published' })
+  });
+  const { data: academicYearsData, isLoading: academicYearsLoading } = useQuery({
+    queryKey:['academic-years'],
+    queryFn:lmsApi.listAcademicYears
   });
   const { data: detailData, isLoading: detailLoading } = useQuery({ queryKey:['class',selId], queryFn:()=>lmsApi.getClassById(selId), enabled:Boolean(selId) });
   const { data: pendingData, isLoading: pendingLoading } = useQuery({
@@ -2633,35 +2639,57 @@ export function InstructorClassManagementPage() {
   const { data: attendSummaryData } = useQuery({ queryKey:['attendance-summary',selId], queryFn:()=>lmsApi.getAttendanceSummary({ classId:selId }), enabled:Boolean(selId) });
 
   const classes = clsData?.data?.classes||[];
-  const offerings = (offeringsData?.data?.offerings||[]).filter((offering) => offering.status === 'published');
+  const courses = coursesData?.data?.courses || [];
+  const availableYears = (academicYearsData?.data?.academicYears || [])
+    .filter((year) => ['active', 'upcoming'].includes(year.status));
+  const selectedAcademicYear = availableYears.find((year) => Number(year.id) === Number(newClassForm.academicYearId));
+  const availableSemesters = (selectedAcademicYear?.semesters || [])
+    .filter((semester) => ['active', 'upcoming'].includes(semester.status));
   const cls = detailData?.data?.classSection;
   const pendingEnrollments = pendingData?.data?.pending || [];
   const sessions = attendData?.data?.sessions||[];
   const attendSummary = attendSummaryData?.data?.summary||[];
 
-  useEffect(() => {
-    if (!newClassForm.courseOfferingId && offerings.length > 0) {
-      setNewClassForm((form) => ({ ...form, courseOfferingId: String(offerings[0].id) }));
-    }
-  }, [newClassForm.courseOfferingId, offerings]);
+  const openCreateClass = () => {
+    const preferredYear = availableYears.find((year) => year.isCurrent) || availableYears[0];
+    const yearSemesters = (preferredYear?.semesters || [])
+      .filter((semester) => ['active', 'upcoming'].includes(semester.status));
+    const preferredSemester = yearSemesters.find((semester) => semester.isCurrent) || yearSemesters[0];
+
+    setNewClassForm({
+      courseId: String(courses[0]?.id || ''),
+      academicYearId: String(preferredYear?.id || ''),
+      semesterId: String(preferredSemester?.id || ''),
+      sectionCode: '',
+      name: '',
+      room: '',
+      schedule: '',
+      capacity: 40
+    });
+    setCreateClassOpen(true);
+  };
 
   const handleCreateClass = async (e) => {
     e.preventDefault();
     try {
       const result = await lmsApi.createInstructorClass({
         ...newClassForm,
-        courseOfferingId: Number(newClassForm.courseOfferingId),
+        courseId: Number(newClassForm.courseId),
+        academicYearId: Number(newClassForm.academicYearId),
+        semesterId: Number(newClassForm.semesterId),
         capacity: Number(newClassForm.capacity)
       });
       const createdClass = result.data.classSection;
-      addToast('Class section created and assigned to you.');
+      addToast(result.message || 'Class section created and assigned to you.');
       setCreatedClassJoinCode({
         sectionCode: createdClass.sectionCode,
         joinCode: createdClass.joinCode
       });
       setCreateClassOpen(false);
       setNewClassForm({
-        courseOfferingId: String(offerings[0]?.id || ''),
+        courseId: '',
+        academicYearId: '',
+        semesterId: '',
         sectionCode: '',
         name: '',
         room: '',
@@ -2669,6 +2697,7 @@ export function InstructorClassManagementPage() {
         capacity: 40
       });
       setSelId(createdClass.id);
+      queryClient.invalidateQueries({ queryKey:['course-offerings'] });
       queryClient.invalidateQueries({ queryKey:['classes'] });
       queryClient.invalidateQueries({ queryKey:['class', createdClass.id] });
     } catch (err) {
@@ -2759,8 +2788,8 @@ export function InstructorClassManagementPage() {
         <p className="text-sm text-slate-500 mt-1">View assigned class sections, rosters, grade weights, and issue certificates.</p>
         <button
           type="button"
-          onClick={() => setCreateClassOpen(true)}
-          disabled={offeringsLoading}
+          onClick={openCreateClass}
+          disabled={coursesLoading || academicYearsLoading}
           className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg"
         >
           <Plus className="w-4 h-4"/> Create Class
@@ -2977,27 +3006,80 @@ export function InstructorClassManagementPage() {
       <ModalDialog isOpen={createClassOpen} onClose={() => setCreateClassOpen(false)} title="Create Class Section">
         <form onSubmit={handleCreateClass} className="space-y-3 text-xs">
           <p className="text-slate-500">
-            This creates a real section under an existing published course offering, assigns it to you, and generates a join code for student enrollment requests.
+            Choose the course and term. If no offering exists for them yet, one will be created before your class section.
           </p>
           <div>
-            <label className="block font-semibold mb-1">Course Offering</label>
+            <label className="block font-semibold mb-1">Course</label>
             <select
               required
-              value={newClassForm.courseOfferingId}
-              onChange={(e) => setNewClassForm((form) => ({ ...form, courseOfferingId: e.target.value }))}
+              value={newClassForm.courseId}
+              onChange={(e) => setNewClassForm((form) => ({ ...form, courseId: e.target.value }))}
               className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
             >
-              {offerings.map((offering) => (
-                <option key={offering.id} value={offering.id}>
-                  {offering.offeringCode} — {offering.titleOverride || offering.course?.title}
-                  {offering.semester?.name ? ` (${offering.semester.name})` : ''}
+              <option value="">— Select a published course —</option>
+              {courses.map((course) => (
+                <option key={course.id} value={course.id}>
+                  {course.code} — {course.title}
                 </option>
               ))}
             </select>
-            {offerings.length === 0 && (
-              <p className="mt-1 text-amber-700">No published course offerings are available. An administrator must create one first.</p>
+            {courses.length === 0 && (
+              <p className="mt-1 text-amber-700">No published courses are available. Publish a course in My Courses &amp; Content first.</p>
             )}
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold mb-1">Academic Year</label>
+              <select
+                required
+                value={newClassForm.academicYearId}
+                onChange={(e) => {
+                  const year = availableYears.find((item) => String(item.id) === e.target.value);
+                  const semesters = (year?.semesters || [])
+                    .filter((semester) => ['active', 'upcoming'].includes(semester.status));
+                  const semester = semesters.find((item) => item.isCurrent) || semesters[0];
+                  setNewClassForm((form) => ({
+                    ...form,
+                    academicYearId: e.target.value,
+                    semesterId: String(semester?.id || '')
+                  }));
+                }}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="">— Select year —</option>
+                {availableYears.map((year) => (
+                  <option key={year.id} value={year.id}>{year.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Semester</label>
+              <select
+                required
+                value={newClassForm.semesterId}
+                onChange={(e) => setNewClassForm((form) => ({ ...form, semesterId: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                <option value="">— Select semester —</option>
+                {availableSemesters.map((semester) => (
+                  <option key={semester.id} value={semester.id}>{semester.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {availableYears.length === 0 && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+              An active or upcoming academic year is required to create a class.
+            </p>
+          )}
+          {selectedAcademicYear && availableSemesters.length === 0 && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+              There are no active or upcoming semesters in this academic year.
+            </p>
+          )}
+          <p className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-blue-900">
+            The section will be assigned to you and a join code will be generated for student enrollment requests.
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold mb-1">Section Code</label>
@@ -3060,7 +3142,7 @@ export function InstructorClassManagementPage() {
           </div>
           <button
             type="submit"
-            disabled={offerings.length === 0}
+            disabled={courses.length === 0 || !newClassForm.courseId || !newClassForm.academicYearId || !newClassForm.semesterId}
             className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-lg"
           >
             Create Class

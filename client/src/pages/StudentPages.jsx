@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   BookOpen,
   ClipboardCheck,
@@ -549,7 +549,7 @@ export function StudentDashboardPage() {
                     </div>
                   </div>
 
-                  <Link to="/student/courses" className="mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
+                  <Link to={`/student/courses/${course.classId}`} className="mt-auto inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
                     {progress > 0 && progress < 100 ? 'Resume Course' : progress >= 100 ? 'Review Course' : 'Open Course'}
                     <ChevronRight className="h-4 w-4" />
                   </Link>
@@ -745,7 +745,7 @@ export function StudentCatalogPage() {
                     </span>
                   ) : ['enrolled', 'completed'].includes(cls.studentMembershipStatus) ? (
                     <Link
-                      to="/student/courses"
+                      to={`/student/courses/${cls.id}`}
                       className="shrink-0 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg"
                     >
                       {cls.studentMembershipStatus === 'completed' ? 'Completed' : 'Open My Class'}
@@ -780,10 +780,76 @@ export function StudentCatalogPage() {
   );
 }
 
+function InlineLessonResource({ resource, classId, previewKey, onPreviewReady }) {
+  const fileName = resource.originalFilename || resource.title;
+  const extension = fileName.split('.').pop()?.toLowerCase();
+  const isPdf = extension === 'pdf' || resource.mimeType === 'application/pdf';
+  const isWordDocument = extension === 'docx' ||
+    resource.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const previewUrl = `/api/resources/${resource.id}/preview?classId=${classId}`;
+  const { data: previewHtml, isLoading, error } = useQuery({
+    queryKey: ['resource-preview', resource.id, classId],
+    queryFn: () => lmsApi.getResourcePreview(resource.id, { classId }),
+    enabled: Boolean(isWordDocument && resource.storedFilename)
+  });
+  useEffect(() => {
+    if (isWordDocument && resource.storedFilename && !isLoading) {
+      onPreviewReady(previewKey);
+    }
+  }, [isLoading, isWordDocument, onPreviewReady, previewKey, resource.storedFilename]);
+
+  const externalUrl = resource.externalUrl || (!resource.storedFilename && resource.fileUrl);
+  if (externalUrl) {
+    return (
+      <a
+        href={externalUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="block rounded-lg border border-slate-200 p-3 text-xs font-semibold text-blue-700 hover:bg-slate-50"
+      >
+        Open reference: {fileName}
+      </a>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+        <h4 className="text-xs font-semibold text-slate-800">{fileName}</h4>
+        <p className="mt-0.5 text-[10px] uppercase text-slate-500">{resource.resourceType} · Preview</p>
+      </div>
+      {isPdf && resource.storedFilename ? (
+        <iframe
+          title={`${fileName} preview`}
+          src={`${previewUrl}#toolbar=0&navpanes=0`}
+          onLoad={() => onPreviewReady(previewKey)}
+          className="h-[70vh] min-h-[420px] w-full bg-white"
+        />
+      ) : isWordDocument && resource.storedFilename ? (
+        isLoading ? (
+          <p className="p-4 text-xs text-slate-500">Loading document preview…</p>
+        ) : error ? (
+          <p role="alert" className="p-4 text-xs text-rose-700">
+            Could not load document preview: {extractErrorMessage(error)}
+          </p>
+        ) : (
+          <div
+            className="lesson-prose p-4 text-sm"
+            dangerouslySetInnerHTML={{ __html: previewHtml || '' }}
+          />
+        )
+      ) : (
+        <p className="p-4 text-xs text-slate-500">Inline preview is not available for this file type.</p>
+      )}
+    </section>
+  );
+}
+
 export function StudentCourseLearningPage() {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
-  const [selectedClassId, setSelectedClassId] = useState(1);
+  const { classId: routeClassId } = useParams();
+  const navigate = useNavigate();
   const [activeLessonId, setActiveLessonId] = useState(null);
   const [activeQuizSession, setActiveQuizSession] = useState(null);
   const [quizAnswersMap, setQuizAnswersMap] = useState({});
@@ -792,6 +858,9 @@ export function StudentCourseLearningPage() {
   const [isSubmittingQuiz, setIsSubmittingQuiz] = useState(false);
   const [openModules, setOpenModules] = useState({});
   const [lastQuizResult, setLastQuizResult] = useState(null);
+  const [lessonEndReachedKey, setLessonEndReachedKey] = useState(null);
+  const [readyPreviewKeys, setReadyPreviewKeys] = useState({});
+  const lessonScrollRef = useRef(null);
 
   const {
     data: enrollmentsData,
@@ -806,7 +875,9 @@ export function StudentCourseLearningPage() {
   const enrollments = (enrollmentsData?.data?.enrollments || []).filter(
     (enrollment) => ['enrolled', 'completed'].includes(enrollment.status)
   );
-  const activeEnrollment = enrollments.find((e) => e.classId === selectedClassId) || enrollments[0];
+  const activeEnrollment = routeClassId
+    ? enrollments.find((enrollment) => Number(enrollment.classId) === Number(routeClassId))
+    : enrollments[0];
   const activeClassId = activeEnrollment?.classId;
   const activeCourseId = activeEnrollment?.classSection?.courseOffering?.course?.id;
 
@@ -837,6 +908,34 @@ export function StudentCourseLearningPage() {
   const allLessons = (course?.modules || []).flatMap((m) => m.lessons || []);
   const currentLesson = allLessons.find((l) => l.id === activeLessonId) || allLessons[0];
   const currentIndex = allLessons.findIndex((l) => l.id === currentLesson?.id);
+  const currentModule = (course?.modules || []).find((module) =>
+    (module.lessons || []).some((lesson) => lesson.id === currentLesson?.id)
+  );
+  const attachedResources = [
+    ...(course?.resources || []).filter((resource) => !resource.moduleId && !resource.lessonId),
+    ...(currentModule?.resources || []),
+    ...(currentLesson?.resources || [])
+  ].filter((resource, index, resources) =>
+    resources.findIndex((item) => item.id === resource.id) === index &&
+    (resource.externalUrl || resource.storedFilename || resource.fileUrl)
+  );
+  const lessonReadKey = currentLesson ? `${activeClassId}:${currentLesson.id}` : null;
+  const previewKeys = attachedResources
+    .filter((resource) => {
+      const fileName = resource.originalFilename || resource.title || '';
+      const extension = fileName.split('.').pop()?.toLowerCase();
+      return resource.storedFilename && (
+        extension === 'pdf' ||
+        extension === 'docx' ||
+        resource.mimeType === 'application/pdf' ||
+        resource.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      );
+    })
+    .map((resource) => `${lessonReadKey}:${resource.id}`);
+  const lessonPreviewsReady = previewKeys.every((key) => readyPreviewKeys[key]);
+  const hasReachedLessonEnd = Boolean(lessonReadKey && lessonEndReachedKey === lessonReadKey);
+  const moduleLessons = currentModule?.lessons || [];
+  const isLastLessonInModule = moduleLessons[moduleLessons.length - 1]?.id === currentLesson?.id;
 
   const completedLessonIds = new Set(
     (progressData?.data?.lessonProgress || [])
@@ -857,6 +956,7 @@ export function StudentCourseLearningPage() {
     ['quiz', 'module_exam'].includes(a.assessmentType)
   );
   const requiredQuizzes = courseQuizzes.length > 0 ? courseQuizzes : classAssessments;
+  const courseCompletionQuizzes = requiredQuizzes.filter((quiz) => !quiz.moduleId);
 
   const getAttemptPercentage = (assessment, attempt) => {
     const maxScore = Number(assessment.maxScore || 100);
@@ -873,13 +973,35 @@ export function StudentCourseLearningPage() {
     );
   };
 
+  const currentModuleQuiz = currentModule
+    ? requiredQuizzes.find((quiz) => Number(quiz.moduleId) === Number(currentModule.id) && !isQuizPassed(quiz))
+    : null;
+  const currentModuleQuizInProgress = currentModuleQuiz?.attempts?.some(
+    (attempt) => attempt.status === 'in_progress'
+  ) || false;
+  const moduleLessonsReadyForQuiz = Boolean(
+    currentModule &&
+    moduleLessons.every((lesson) => completedLessonIds.has(lesson.id) || lesson.id === currentLesson?.id)
+  );
+  const currentModuleQuizAttemptsExhausted = Boolean(
+    currentModuleQuiz &&
+    (currentModuleQuiz.attempts || []).length >= Number(currentModuleQuiz.maxAttempts || 1) &&
+    !currentModuleQuizInProgress
+  );
+
   const getQuizBestScore = (asmt) => {
     const attempts = (asmt.attempts || []).filter((att) => ['submitted', 'graded'].includes(att.status));
     if (attempts.length === 0) return null;
     return Math.max(...attempts.map((att) => getAttemptPercentage(asmt, att)));
   };
 
-  const nextUnpassedQuiz = requiredQuizzes.find((q) => !isQuizPassed(q)) || null;
+  const orderedQuizzes = [
+    ...(course?.modules || []).flatMap((module) => (
+      requiredQuizzes.filter((quiz) => Number(quiz.moduleId) === Number(module.id))
+    )),
+    ...courseCompletionQuizzes
+  ];
+  const nextUnpassedQuiz = orderedQuizzes.find((quiz) => !isQuizPassed(quiz)) || null;
   const nextUncompletedLesson = allLessons.find((lesson) => !completedLessonIds.has(lesson.id)) || null;
   const nextQuizInProgress = nextUnpassedQuiz?.attempts?.some(
     (attempt) => attempt.status === 'in_progress'
@@ -919,6 +1041,38 @@ export function StudentCourseLearningPage() {
     },
     onError: (error) => addToast(extractErrorMessage(error), 'error')
   });
+
+  useEffect(() => {
+    if (lessonScrollRef.current) lessonScrollRef.current.scrollTop = 0;
+  }, [lessonReadKey]);
+
+  useEffect(() => {
+    const container = lessonScrollRef.current;
+    if (!currentLesson || !container || !lessonPreviewsReady) return undefined;
+
+    const checkLessonEnd = () => {
+      if (
+        container.scrollHeight > 0 &&
+        container.scrollTop + container.clientHeight >= container.scrollHeight - 1
+      ) {
+        setLessonEndReachedKey(lessonReadKey);
+      }
+    };
+
+    checkLessonEnd();
+    container.addEventListener('scroll', checkLessonEnd, { passive: true });
+    window.addEventListener('resize', checkLessonEnd);
+    return () => {
+      container.removeEventListener('scroll', checkLessonEnd);
+      window.removeEventListener('resize', checkLessonEnd);
+    };
+  }, [currentLesson, lessonPreviewsReady, lessonReadKey]);
+
+  useEffect(() => {
+    setActiveLessonId(null);
+    setLastQuizResult(null);
+    setOpenModules({});
+  }, [routeClassId]);
 
   useEffect(() => {
     if (!activeQuizSession || Object.keys(quizAnswersMap).length === 0) return undefined;
@@ -1062,12 +1216,16 @@ export function StudentCourseLearningPage() {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
         <BookOpen className="mx-auto h-10 w-10 text-blue-600" />
-        <h1 className="mt-4 text-xl font-bold text-slate-900">No active classes yet</h1>
+        <h1 className="mt-4 text-xl font-bold text-slate-900">
+          {routeClassId ? 'Class not available' : 'No active classes yet'}
+        </h1>
         <p className="mx-auto mt-2 max-w-lg text-sm text-slate-600">
-          Once the registrar enrolls you, your classes and learning materials will appear here.
+          {routeClassId
+            ? 'This class is not in your enrolled classes. Open a course from My Classes to continue learning.'
+            : 'Once you are enrolled in a class, your courses and learning materials will appear here.'}
         </p>
-        <Link to="/student/catalog" className="mt-5 inline-flex rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">
-          Browse eligible classes
+        <Link to={routeClassId ? '/student/classes/semester' : '/student/catalog'} className="mt-5 inline-flex rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">
+          {routeClassId ? 'Go to My Classes' : 'Browse courses'}
         </Link>
       </div>
     );
@@ -1087,6 +1245,15 @@ export function StudentCourseLearningPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <Link
+          to="/student/classes/semester"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          <ChevronLeft className="h-4 w-4" /> My Classes
+        </Link>
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Course learning space</span>
+      </div>
       <section className="overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 via-white to-indigo-50 shadow-sm">
         <div className="flex flex-col gap-5 p-4 sm:flex-row sm:items-center sm:p-5">
           <div className="flex h-24 w-full shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white sm:h-24 sm:w-40">
@@ -1120,9 +1287,7 @@ export function StudentCourseLearningPage() {
               onChange={(e) => {
                 const nextClassId = Number(e.target.value);
                 const switchClass = () => {
-                  setSelectedClassId(nextClassId);
-                  setActiveLessonId(null);
-                  setLastQuizResult(null);
+                  navigate(`/student/courses/${nextClassId}`);
                 };
                 handleLeaveEmbeddedQuiz(switchClass);
               }}
@@ -1313,7 +1478,7 @@ export function StudentCourseLearningPage() {
       )}
 
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12">
-        <aside className="space-y-4 lg:col-span-4">
+        <aside className="space-y-4 lg:sticky lg:top-4 lg:col-span-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between bg-[#173b69] px-4 py-3 text-white">
               <div>
@@ -1383,6 +1548,44 @@ export function StudentCourseLearningPage() {
                             </button>
                           );
                         })}
+                        {requiredQuizzes
+                          .filter((quiz) => Number(quiz.moduleId) === Number(mod.id))
+                          .map((quiz) => {
+                            const passed = isQuizPassed(quiz);
+                            const hasInProgress = (quiz.attempts || []).some((attempt) => attempt.status === 'in_progress');
+                            const moduleLessonsCompleted = (mod.lessons || []).every((lesson) => completedLessonIds.has(lesson.id));
+                            const attemptsExhausted =
+                              (quiz.attempts || []).length >= Number(quiz.maxAttempts || 1) && !hasInProgress;
+                            return (
+                              <button
+                                key={quiz.id}
+                                type="button"
+                                disabled={
+                                  (attemptsExhausted && !passed) ||
+                                  (!moduleLessonsCompleted && !passed && !hasInProgress)
+                                }
+                                onClick={() => handleOpenEmbeddedQuiz(quiz)}
+                                className="flex w-full items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2.5 text-left text-xs transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                <ClipboardCheck className={`h-4 w-4 shrink-0 ${passed ? 'text-emerald-600' : 'text-indigo-600'}`} />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate font-semibold text-slate-900">{quiz.title}</span>
+                                  <span className="mt-0.5 block text-[10px] text-slate-600">
+                                    {passed
+                                      ? 'Passed · Retake Quiz'
+                                      : hasInProgress
+                                        ? 'Continue Quiz'
+                                        : attemptsExhausted
+                                          ? 'Attempts used'
+                                          : moduleLessonsCompleted
+                                            ? 'Start Quiz'
+                                            : 'Complete lessons to unlock'}
+                                  </span>
+                                </span>
+                                <ChevronRight className="h-4 w-4 shrink-0 text-indigo-600" />
+                              </button>
+                            );
+                          })}
                       </div>
                     )}
                   </div>
@@ -1391,19 +1594,16 @@ export function StudentCourseLearningPage() {
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-sm">
+          {courseCompletionQuizzes.length > 0 && <section className="overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-sm">
             <div className="flex items-center gap-3 bg-gradient-to-r from-indigo-700 to-blue-600 px-4 py-3 text-white">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15"><ClipboardCheck className="h-5 w-5" /></span>
               <div>
-                <h2 className="text-sm font-bold">Course Completion Quiz</h2>
-                <p className="text-[11px] text-indigo-100">Required to finish this course.</p>
+                <h2 className="text-sm font-bold">Course Quizzes</h2>
+                <p className="text-[11px] text-indigo-100">Assessments not assigned to a specific module.</p>
               </div>
             </div>
             <div className="space-y-3 p-4">
-            {requiredQuizzes.length === 0 ? (
-              <p className="text-xs text-slate-500">No completion quizzes are configured for this class.</p>
-            ) : (
-              requiredQuizzes.map((qz) => {
+              {courseCompletionQuizzes.map((qz) => {
                 const passed = isQuizPassed(qz);
                 const best = getQuizBestScore(qz);
                 const attemptCount = (qz.attempts || []).length;
@@ -1465,10 +1665,9 @@ export function StudentCourseLearningPage() {
                     </button>
                   </div>
                 );
-              })
-            )}
+              })}
             </div>
-          </section>
+          </section>}
         </aside>
 
         {/* Main Viewer Area: Either Embedded NetAcad Quiz Runner OR Lesson Content */}
@@ -1556,7 +1755,11 @@ export function StudentCourseLearningPage() {
             </section>
           )}
 
-          <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <div
+            ref={lessonScrollRef}
+            data-testid="lesson-scroll-container"
+            className="min-w-0 max-h-[calc(100vh-8rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:sticky lg:top-4 lg:h-[calc(100vh-6rem)] lg:max-h-none"
+          >
           {activeQuizSession ? (
             <div className="space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-gradient-to-r from-indigo-700 to-blue-600 p-4 text-white">
@@ -1893,33 +2096,36 @@ export function StudentCourseLearningPage() {
               )}
 
               {/* Downloadable Resources */}
-              {(course?.resources || []).length > 0 && (
+              {attachedResources.length > 0 && (
                 <div className="pt-4 border-t border-slate-200 space-y-2">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                     Attached Learning Resources & Lab Worksheets
                   </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {(course.resources || []).map((res) => (
-                      <a
-                        key={res.id}
-                        href={res.externalUrl || res.fileUrl || '#'}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center justify-between p-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs"
-                      >
-                        <div>
-                          <p className="font-semibold text-slate-900">{res.title}</p>
-                          <p className="text-slate-500 uppercase text-[10px]">{res.resourceType}</p>
-                        </div>
-                        <Download className="w-4 h-4 text-blue-600 shrink-0" />
-                      </a>
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {attachedResources.map((resource) => (
+                      <InlineLessonResource
+                        key={resource.id}
+                        resource={resource}
+                        classId={activeClassId}
+                        previewKey={`${lessonReadKey}:${resource.id}`}
+                        onPreviewReady={(key) => {
+                          setReadyPreviewKeys((previous) =>
+                            previous[key] ? previous : { ...previous, [key]: true }
+                          );
+                        }}
+                      />
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Previous & Next / Proceed to Course Completion Quiz Controls */}
+              {/* Move through lessons and take module-end quizzes before continuing. */}
               <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                {!hasReachedLessonEnd && !completedLessonIds.has(currentLesson.id) && (
+                  <p className="basis-full text-right text-xs text-slate-500">
+                    Scroll to the bottom of the lesson to enable completion.
+                  </p>
+                )}
                 <button
                   type="button"
                   disabled={currentIndex <= 0}
@@ -1930,10 +2136,43 @@ export function StudentCourseLearningPage() {
                   Previous Lesson
                 </button>
 
-                {currentIndex < allLessons.length - 1 ? (
+                {currentModuleQuiz && isLastLessonInModule && moduleLessonsReadyForQuiz ? (
                   <button
                     type="button"
-                    disabled={completeMutation.isPending}
+                    disabled={
+                      completeMutation.isPending ||
+                      currentModuleQuizAttemptsExhausted ||
+                      (!hasReachedLessonEnd && !completedLessonIds.has(currentLesson.id))
+                    }
+                    onClick={() => {
+                      const startModuleQuiz = () => handleOpenEmbeddedQuiz(currentModuleQuiz);
+                      if (!completedLessonIds.has(currentLesson.id)) {
+                        completeMutation.mutate(
+                          { lessonId: currentLesson.id },
+                          { onSuccess: startModuleQuiz }
+                        );
+                      } else {
+                        startModuleQuiz();
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {completeMutation.isPending
+                      ? 'Saving progress…'
+                      : currentModuleQuizAttemptsExhausted
+                        ? 'Attempts used'
+                        : completedLessonIds.has(currentLesson.id)
+                        ? `Take ${currentModuleQuiz.title}`
+                        : 'Complete & Take Module Quiz'}
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                ) : currentIndex < allLessons.length - 1 ? (
+                  <button
+                    type="button"
+                    disabled={
+                      completeMutation.isPending ||
+                      (!hasReachedLessonEnd && !completedLessonIds.has(currentLesson.id))
+                    }
                     onClick={() => {
                       if (!completedLessonIds.has(currentLesson.id)) {
                         completeMutation.mutate(
@@ -1952,7 +2191,7 @@ export function StudentCourseLearningPage() {
                 ) : !completedLessonIds.has(currentLesson.id) ? (
                   <button
                     type="button"
-                    disabled={completeMutation.isPending}
+                    disabled={completeMutation.isPending || !hasReachedLessonEnd}
                     onClick={() => completeMutation.mutate({ lessonId: currentLesson.id })}
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-xs font-semibold text-white disabled:cursor-wait disabled:opacity-50"
                   >
@@ -3270,7 +3509,7 @@ export function StudentClassesSubPage() {
 
                 <div className="mt-auto pt-5">
                   <Link
-                    to="/student/courses"
+                    to={`/student/courses/${en.classId}`}
                     className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                   >
                     Open Course <ChevronRight className="h-4 w-4" aria-hidden="true" />

@@ -187,6 +187,17 @@ const classSectionSchema = z.object({
   instructorId: z.coerce.number().int().positive().optional().nullable()
 });
 
+const instructorClassSectionSchema = z.union([
+  classSectionSchema,
+  classSectionSchema
+    .omit({ courseOfferingId: true, instructorId: true })
+    .extend({
+      courseId: z.coerce.number().int().positive(),
+      academicYearId: z.coerce.number().int().positive(),
+      semesterId: z.coerce.number().int().positive()
+    })
+]);
+
 const updateClassSectionSchema = z.object({
   sectionCode:          z.string().min(2).max(60).optional(),
   name:                 z.string().min(3).max(150).optional(),
@@ -411,6 +422,7 @@ module.exports = {
   courseSchema,
   courseOfferingSchema,
   classSectionSchema,
+  instructorClassSectionSchema,
   studentPlacementSchema,
   classEligibilitySchema,
   moduleSchema,

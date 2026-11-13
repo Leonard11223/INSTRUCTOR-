@@ -1,10 +1,16 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+const fs = require('fs');
+const path = require('path');
 
 const { app, sessionStore } = require('../src/app');
+const env = require('../src/config/env');
 const { getResourceTypeForUpload } = require('../src/controllers/content.controller');
 const {
   Assessment,
   AssessmentQuestion,
+  ClassSection,
+  CourseOffering,
+  LearningResource,
   Module,
   Question,
   QuestionOption,
@@ -323,6 +329,57 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       });
       expect(forbiddenRes.status).toBe(401);
     });
+
+    it('lets instructors create a term offering and class section directly from a published course', async () => {
+      const courseCode = `INLINE-${Date.now()}`;
+      const courseRes = await instructorAgent.post('/api/courses').send({
+        departmentId: 1,
+        programId: 1,
+        code: courseCode,
+        title: `Inline Offering Test ${courseCode}`,
+        description: 'Testing the instructor course-to-class offering workflow.'
+      });
+      expect(courseRes.status).toBe(201);
+
+      const yearsRes = await instructorAgent.get('/api/academic-years');
+      const year = yearsRes.body.data.academicYears.find(
+        (item) => ['active', 'upcoming'].includes(item.status)
+      );
+      expect(year).toBeDefined();
+      const semester = year.semesters.find((item) => ['active', 'upcoming'].includes(item.status));
+      expect(semester).toBeDefined();
+
+      const sectionCode = `INLINE-${Date.now()}`;
+      const createRes = await instructorAgent.post('/api/classes/instructor').send({
+        courseId: courseRes.body.data.course.id,
+        academicYearId: year.id,
+        semesterId: semester.id,
+        sectionCode,
+        name: `Inline test section ${sectionCode}`,
+        capacity: 25
+      });
+
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.data.courseOffering).toEqual(expect.objectContaining({
+        courseId: courseRes.body.data.course.id,
+        academicYearId: year.id,
+        semesterId: semester.id,
+        status: 'published'
+      }));
+      expect(createRes.body.data.classSection.courseOfferingId).toBe(createRes.body.data.courseOffering.id);
+
+      const nextSectionRes = await instructorAgent.post('/api/classes/instructor').send({
+        courseId: courseRes.body.data.course.id,
+        academicYearId: year.id,
+        semesterId: semester.id,
+        sectionCode: `${sectionCode}-B`,
+        name: `Second inline test section ${sectionCode}`,
+        capacity: 25
+      });
+
+      expect(nextSectionRes.status).toBe(201);
+      expect(nextSectionRes.body.data.courseOffering.id).toBe(createRes.body.data.courseOffering.id);
+    });
   });
 
   describe('4. Learning Content Authoring, XSS Sanitization & Student Progress Tracking', () => {
@@ -347,6 +404,46 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       expect(lessonRes.status).toBe(201);
       expect(lessonRes.body.data.lesson.contentHtml).not.toContain('<script>');
       expect(lessonRes.body.data.lesson.contentHtml).not.toContain('onclick=');
+    });
+
+    it('serves lesson PDFs inline only to users with access to the matching class', async () => {
+      const classSection = await ClassSection.findByPk(1, {
+        include: [{ model: CourseOffering, as: 'courseOffering' }]
+      });
+      const storedFilename = `preview-${process.pid}-${Date.now()}.pdf`;
+      const filePath = path.join(env.UPLOAD_DIR, storedFilename);
+      fs.mkdirSync(env.UPLOAD_DIR, { recursive: true });
+      fs.writeFileSync(filePath, '%PDF-1.4 preview test');
+
+      let resource;
+      try {
+        resource = await LearningResource.create({
+          courseId: classSection.courseOffering.courseId,
+          title: 'Preview test.pdf',
+          resourceType: 'pdf',
+          storedFilename,
+          originalFilename: 'Preview test.pdf',
+          mimeType: 'application/pdf'
+        });
+
+        const missingClassRes = await studentAgent.get(`/api/resources/${resource.id}/preview`);
+        expect(missingClassRes.status).toBe(400);
+
+        const previewRes = await studentAgent.get(
+          `/api/resources/${resource.id}/preview?classId=${classSection.id}`
+        );
+        expect(previewRes.status).toBe(200);
+        expect(previewRes.headers['content-type']).toContain('application/pdf');
+        expect(previewRes.headers['content-disposition']).toBe('inline');
+
+        const inaccessibleClassRes = await instructor2Agent.get(
+          `/api/resources/${resource.id}/preview?classId=${classSection.id}`
+        );
+        expect(inaccessibleClassRes.status).toBe(403);
+      } finally {
+        if (resource) await resource.destroy();
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
     });
 
     it('updates student lesson completion and recalculates course progress', async () => {

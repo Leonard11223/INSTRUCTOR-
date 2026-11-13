@@ -148,6 +148,7 @@ router.post('/lessons/:id/attach-file', requireAuth, requirePermission('content:
 router.get('/resources', requireAuth, contentCtrl.listResources);
 router.post('/resources', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), uploadMiddleware.single('file'), contentCtrl.createResource);
 router.get('/resources/:id/download', requireAuth, contentCtrl.downloadResourceFile);
+router.get('/resources/:id/preview', requireAuth, contentCtrl.previewResourceFile);
 
 router.post('/progress/lessons', requireAuth, contentCtrl.updateLessonProgress);
 router.get('/progress', requireAuth, contentCtrl.getProgressAnalytics);

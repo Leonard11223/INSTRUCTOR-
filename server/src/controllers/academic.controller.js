@@ -41,6 +41,7 @@ const {
   updateCourseSchema,
   updateCourseOfferingSchema,
   classSectionSchema,
+  instructorClassSectionSchema,
   updateClassSectionSchema,
   studentPlacementSchema,
   classEligibilitySchema
@@ -1064,15 +1065,89 @@ async function createClassSection(req, res, next) {
 async function createInstructorClassSection(req, res, next) {
   const t = await sequelize.transaction();
   try {
-    const payload = classSectionSchema.parse(req.body);
-    const offering = await CourseOffering.findByPk(payload.courseOfferingId, { transaction: t });
-    if (!offering) throw new AppError('Course offering not found.', 404, 'OFFERING_NOT_FOUND');
-    if (offering.status !== 'published') {
-      throw new AppError('Only published course offerings can be used to create a class.', 400, 'OFFERING_NOT_PUBLISHED');
+    const payload = instructorClassSectionSchema.parse(req.body);
+    let offering;
+    let offeringCreated = false;
+    let classPayload = payload;
+
+    if (payload.courseOfferingId) {
+      offering = await CourseOffering.findByPk(payload.courseOfferingId, { transaction: t });
+      if (!offering) throw new AppError('Course offering not found.', 404, 'OFFERING_NOT_FOUND');
+      if (offering.status !== 'published') {
+        throw new AppError('Only published course offerings can be used to create a class.', 400, 'OFFERING_NOT_PUBLISHED');
+      }
+    } else {
+      const [course, academicYear, semester] = await Promise.all([
+        Course.findByPk(payload.courseId, { transaction: t }),
+        AcademicYear.findByPk(payload.academicYearId, { transaction: t }),
+        Semester.findByPk(payload.semesterId, { transaction: t })
+      ]);
+
+      if (!course) throw new AppError('Course not found.', 404, 'COURSE_NOT_FOUND');
+      if (course.publicationStatus !== 'published') {
+        throw new AppError('Only published courses can be used to create a class.', 400, 'COURSE_NOT_PUBLISHED');
+      }
+      if (!academicYear || !semester) {
+        throw new AppError('Academic year or semester not found.', 404, 'ACADEMIC_TERM_NOT_FOUND');
+      }
+      if (semester.academicYearId !== academicYear.id) {
+        throw new AppError('The selected semester does not belong to the selected academic year.', 400, 'SEMESTER_YEAR_MISMATCH');
+      }
+      if (!['active', 'upcoming'].includes(academicYear.status) || !['active', 'upcoming'].includes(semester.status)) {
+        throw new AppError('Choose an active or upcoming academic year and semester.', 400, 'ACADEMIC_TERM_NOT_OPEN');
+      }
+
+      offering = await CourseOffering.findOne({
+        where: {
+          courseId: course.id,
+          academicYearId: academicYear.id,
+          semesterId: semester.id
+        },
+        order: [['id', 'DESC']],
+        transaction: t
+      });
+
+      if (offering && offering.status !== 'published') {
+        throw new AppError(
+          'This course already has a non-published offering for the selected term. Choose another term or ask an administrator to update the offering.',
+          409,
+          'OFFERING_NOT_PUBLISHED'
+        );
+      }
+
+      if (!offering) {
+        offering = await CourseOffering.create({
+          courseId: course.id,
+          academicYearId: academicYear.id,
+          semesterId: semester.id,
+          offeringCode: `${course.code}-${academicYear.id}-${semester.id}`,
+          enrollmentPolicy: 'instructor_approval',
+          status: 'published'
+        }, { transaction: t });
+        offeringCreated = true;
+      }
+
+      classPayload = { ...payload, courseOfferingId: offering.id };
     }
 
-    const classSection = await createClassSectionRecords(payload, req.user.id, req.user.id, t, true);
+    const classSection = await createClassSectionRecords(classPayload, req.user.id, req.user.id, t, true);
     await t.commit();
+
+    if (offeringCreated) {
+      await recordAudit({
+        req,
+        action: 'INSTRUCTOR_COURSE_OFFERING_CREATED',
+        category: 'academic',
+        entityType: 'CourseOffering',
+        entityId: offering.id,
+        metadata: {
+          courseId: offering.courseId,
+          academicYearId: offering.academicYearId,
+          semesterId: offering.semesterId,
+          offeringCode: offering.offeringCode
+        }
+      });
+    }
 
     await recordAudit({
       req,
@@ -1080,13 +1155,15 @@ async function createInstructorClassSection(req, res, next) {
       category: 'academic',
       entityType: 'ClassSection',
       entityId: classSection.id,
-      metadata: { courseOfferingId: payload.courseOfferingId, sectionCode: payload.sectionCode }
+      metadata: { courseOfferingId: offering.id, sectionCode: payload.sectionCode }
     });
 
     return res.status(201).json({
       success: true,
-      message: 'Class section created and assigned to you.',
-      data: { classSection }
+      message: offeringCreated
+        ? 'Course offering and class section created and assigned to you.'
+        : 'Class section created and assigned to you.',
+      data: { classSection, courseOffering: offering }
     });
   } catch (err) {
     if (!t.finished) await t.rollback();

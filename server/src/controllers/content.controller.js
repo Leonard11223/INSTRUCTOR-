@@ -424,6 +424,71 @@ async function downloadResourceFile(req, res, next) {
   }
 }
 
+async function previewResourceFile(req, res, next) {
+  try {
+    const resource = await LearningResource.findByPk(req.params.id);
+    if (!resource || !resource.storedFilename) {
+      throw new AppError('Resource file not found.', 404);
+    }
+
+    const classId = Number(req.query.classId);
+    if (!classId) {
+      throw new AppError('classId is required to preview this resource.', 400, 'CLASS_ID_REQUIRED');
+    }
+
+    const { classSection } = await verifyClassAccess(req.user, classId, {
+      allowAdmin: true,
+      allowInstructor: true,
+      allowTA: true,
+      allowStudent: true
+    });
+    if (Number(classSection.courseOffering?.courseId) !== Number(resource.courseId)) {
+      throw new AppError('This resource does not belong to the selected class.', 403, 'CLASS_ACCESS_DENIED');
+    }
+
+    const safeName = path.basename(resource.storedFilename);
+    const filePath = path.join(env.UPLOAD_DIR, safeName);
+    if (!fs.existsSync(filePath)) {
+      throw new AppError('Physical file is missing on server.', 404);
+    }
+
+    const extension = path.extname(resource.originalFilename || safeName).toLowerCase();
+    if (extension === '.pdf') {
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'inline',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'private, no-store'
+      });
+      return res.sendFile(filePath);
+    }
+
+    if (extension === '.docx') {
+      const mammoth = require('mammoth');
+      const result = await mammoth.extractRawText({ path: filePath });
+      const html = result.value
+        .split(/\r?\n/)
+        .map((line) => `<p>${line
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')}</p>`)
+        .join('');
+      res.set({
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff'
+      });
+      return res.send(sanitizeRichHtml(html));
+    }
+
+    throw new AppError('Inline preview is not supported for this file type.', 415, 'PREVIEW_UNSUPPORTED');
+  } catch (err) {
+    return next(err);
+  }
+}
+
 // Progress Tracking & Analytics
 async function updateLessonProgress(req, res, next) {
   try {
@@ -584,6 +649,7 @@ module.exports = {
   listResources,
   createResource,
   downloadResourceFile,
+  previewResourceFile,
   updateLessonProgress,
   getProgressAnalytics,
   getResourceTypeForUpload

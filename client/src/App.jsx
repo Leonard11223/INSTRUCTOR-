@@ -410,7 +410,7 @@ export default function App() {
           }
         />
         <Route
-          path="/student/courses"
+          path="/student/courses/:classId?"
           element={
             <ProtectedRoute allowedRoles={['student']}>
               <StudentCourseLearningPage />
