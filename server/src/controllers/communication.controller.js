@@ -1,5 +1,6 @@
 const {
   sequelize,
+  Role,
   Announcement,
   DiscussionThread,
   DiscussionPost,
@@ -14,6 +15,7 @@ const {
   AuditLog,
   User
 } = require('../models');
+const { Op } = require('sequelize');
 const { AppError } = require('../middleware/error.middleware');
 const { verifyClassAccess } = require('../middleware/auth.middleware');
 const { sanitizePlainText } = require('../utils/sanitizer');
@@ -390,6 +392,36 @@ async function listConversations(req, res, next) {
       : [];
 
     return res.status(200).json({ success: true, data: { conversations } });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function listMessageRecipients(req, res, next) {
+  try {
+    const recipients = await User.findAll({
+      where: {
+        status: 'active',
+        id: { [Op.ne]: req.user.id }
+      },
+      attributes: ['id', 'firstName', 'lastName'],
+      include: [{
+        model: Role,
+        as: 'roles',
+        attributes: ['slug'],
+        through: { attributes: [] }
+      }],
+      order: [['firstName', 'ASC'], ['lastName', 'ASC']]
+    });
+
+    const users = recipients.map((recipient) => ({
+      id: recipient.id,
+      firstName: recipient.firstName,
+      lastName: recipient.lastName,
+      primaryRole: recipient.roles?.[0]?.slug || null
+    }));
+
+    return res.status(200).json({ success: true, data: { users } });
   } catch (err) {
     return next(err);
   }
@@ -795,8 +827,8 @@ module.exports = {
   endorseDiscussionPost,
   getDiscussionModerationHistory,
   listConversations,
+  listMessageRecipients,
   startOrSendMessage,
   listNotifications,
   markNotificationRead
 };
-

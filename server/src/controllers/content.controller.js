@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const {
+  sequelize,
   Module,
   Lesson,
   LearningResource,
@@ -20,6 +21,31 @@ const { sanitizeRichHtml, sanitizePlainText } = require('../utils/sanitizer');
 const { recordAudit } = require('../utils/auditLogger');
 const { recalculateStudentCourseProgress } = require('../services/progress.service');
 const { moduleSchema, lessonSchema } = require('../validators/schemas');
+const logger = require('../config/logger');
+
+function getResourceTypeForUpload(filename) {
+  const extension = path.extname(filename || '').toLowerCase();
+  const typesByExtension = {
+    '.pdf': 'pdf',
+    '.ppt': 'presentation',
+    '.pptx': 'presentation',
+    '.zip': 'archive',
+    '.pkt': 'packet_tracer',
+    '.py': 'code',
+    '.js': 'code',
+    '.jsx': 'code',
+    '.ts': 'code',
+    '.sql': 'code',
+    '.json': 'code',
+    '.yaml': 'code',
+    '.yml': 'code',
+    '.mp4': 'video',
+    '.csv': 'worksheet',
+    '.xls': 'worksheet',
+    '.xlsx': 'worksheet'
+  };
+  return typesByExtension[extension] || 'document';
+}
 
 // Modules
 async function listModules(req, res, next) {
@@ -131,39 +157,40 @@ async function getLessonById(req, res, next) {
 }
 
 async function createLesson(req, res, next) {
+  let transaction;
   try {
     const payload = lessonSchema.parse(req.body);
     const sanitizedHtml = sanitizeRichHtml(payload.contentHtml);
     const slug = payload.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    transaction = await sequelize.transaction();
 
     const lesson = await Lesson.create({
       ...payload,
       slug,
       contentHtml: sanitizedHtml
-    });
+    }, { transaction });
 
     // If a file was uploaded alongside the lesson, attach it as a LearningResource
     if (req.file) {
-      const { verifyUploadedFileSafety } = require('../middleware/upload.middleware');
-      const fullPath = path.join(require('../config/env').UPLOAD_DIR, req.file.filename);
-      if (verifyUploadedFileSafety && !verifyUploadedFileSafety(fullPath)) {
-        fs.unlinkSync(fullPath);
-      } else {
-        await LearningResource.create({
-          courseId: lesson.courseId,
-          moduleId: lesson.moduleId,
-          lessonId: lesson.id,
-          title: req.file.originalname,
-          description: 'Attached lesson file',
-          resourceType: 'file',
-          storedFilename: req.file.filename,
-          originalFilename: req.file.originalname,
-          mimeType: req.file.mimetype,
-          fileSizeBytes: req.file.size,
-          uploadedBy: req.user.id
-        });
+      if (!verifyUploadedFileSafety(req.file.path)) {
+        throw new AppError('Uploaded file failed binary safety inspection.', 400, 'UNSAFE_FILE_CONTENT');
       }
+      await LearningResource.create({
+        courseId: lesson.courseId,
+        moduleId: lesson.moduleId,
+        lessonId: lesson.id,
+        title: req.file.originalname,
+        description: 'Attached lesson file',
+        resourceType: getResourceTypeForUpload(req.file.originalname),
+        storedFilename: req.file.filename,
+        originalFilename: req.file.originalname,
+        mimeType: req.file.mimetype,
+        fileSizeBytes: req.file.size,
+        uploadedBy: req.user.id
+      }, { transaction });
     }
+
+    await transaction.commit();
 
     await recordAudit({
       req,
@@ -181,6 +208,17 @@ async function createLesson(req, res, next) {
 
     return res.status(201).json({ success: true, message: 'Lesson created.', data: { lesson: fullLesson } });
   } catch (err) {
+    if (transaction && !transaction.finished) await transaction.rollback();
+    if (req.file && fs.existsSync(req.file.path)) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (cleanupError) {
+        logger.error(
+          { err: cleanupError, filePath: req.file.path },
+          'Failed to remove uploaded lesson file after a failed save'
+        );
+      }
+    }
     return next(err);
   }
 }
@@ -386,6 +424,71 @@ async function downloadResourceFile(req, res, next) {
   }
 }
 
+async function previewResourceFile(req, res, next) {
+  try {
+    const resource = await LearningResource.findByPk(req.params.id);
+    if (!resource || !resource.storedFilename) {
+      throw new AppError('Resource file not found.', 404);
+    }
+
+    const classId = Number(req.query.classId);
+    if (!classId) {
+      throw new AppError('classId is required to preview this resource.', 400, 'CLASS_ID_REQUIRED');
+    }
+
+    const { classSection } = await verifyClassAccess(req.user, classId, {
+      allowAdmin: true,
+      allowInstructor: true,
+      allowTA: true,
+      allowStudent: true
+    });
+    if (Number(classSection.courseOffering?.courseId) !== Number(resource.courseId)) {
+      throw new AppError('This resource does not belong to the selected class.', 403, 'CLASS_ACCESS_DENIED');
+    }
+
+    const safeName = path.basename(resource.storedFilename);
+    const filePath = path.join(env.UPLOAD_DIR, safeName);
+    if (!fs.existsSync(filePath)) {
+      throw new AppError('Physical file is missing on server.', 404);
+    }
+
+    const extension = path.extname(resource.originalFilename || safeName).toLowerCase();
+    if (extension === '.pdf') {
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'inline',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'private, no-store'
+      });
+      return res.sendFile(filePath);
+    }
+
+    if (extension === '.docx') {
+      const mammoth = require('mammoth');
+      const result = await mammoth.extractRawText({ path: filePath });
+      const html = result.value
+        .split(/\r?\n/)
+        .map((line) => `<p>${line
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')}</p>`)
+        .join('');
+      res.set({
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff'
+      });
+      return res.send(sanitizeRichHtml(html));
+    }
+
+    throw new AppError('Inline preview is not supported for this file type.', 415, 'PREVIEW_UNSUPPORTED');
+  } catch (err) {
+    return next(err);
+  }
+}
+
 // Progress Tracking & Analytics
 async function updateLessonProgress(req, res, next) {
   try {
@@ -493,7 +596,7 @@ async function attachFileToLesson(req, res, next) {
       lessonId: lesson.id,
       title: req.body.title || req.file.originalname,
       description: req.body.description || 'Lesson attachment',
-      resourceType: 'file',
+      resourceType: getResourceTypeForUpload(req.file.originalname),
       storedFilename: req.file.filename,
       originalFilename: req.file.originalname,
       mimeType: req.file.mimetype,
@@ -546,7 +649,8 @@ module.exports = {
   listResources,
   createResource,
   downloadResourceFile,
+  previewResourceFile,
   updateLessonProgress,
-  getProgressAnalytics
+  getProgressAnalytics,
+  getResourceTypeForUpload
 };
-

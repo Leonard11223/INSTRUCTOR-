@@ -1,6 +1,7 @@
 const { EventEmitter } = require('events');
 const { Duplex } = require('stream');
 const http = require('http');
+const fs = require('fs');
 
 /**
  * In-process Express HTTP Agent with automatic session cookie persistence.
@@ -113,6 +114,19 @@ class InProcessAgent {
       res.getHeaders = () => ({ ...res.headers });
       res.removeHeader = (name) => {
         delete res.headers[String(name).toLowerCase()];
+      };
+      res.sendFile = (filePath, options, callback) => {
+        const done = typeof options === 'function' ? options : callback;
+        fs.readFile(filePath, (err, contents) => {
+          if (err) {
+            if (done) done(err);
+            else reject(err);
+            return;
+          }
+          res.end(contents);
+          if (done) done();
+        });
+        return res;
       };
       res.writeHead = (statusCode, statusMessage, headers) => {
         res.statusCode = statusCode;

@@ -187,6 +187,17 @@ const classSectionSchema = z.object({
   instructorId: z.coerce.number().int().positive().optional().nullable()
 });
 
+const instructorClassSectionSchema = z.union([
+  classSectionSchema,
+  classSectionSchema
+    .omit({ courseOfferingId: true, instructorId: true })
+    .extend({
+      courseId: z.coerce.number().int().positive(),
+      academicYearId: z.coerce.number().int().positive(),
+      semesterId: z.coerce.number().int().positive()
+    })
+]);
+
 const updateClassSectionSchema = z.object({
   sectionCode:          z.string().min(2).max(60).optional(),
   name:                 z.string().min(3).max(150).optional(),
@@ -301,6 +312,14 @@ const questionSchema = z.object({
   })).optional()
 });
 
+const questionSetSchema = z.object({
+  courseId: z.coerce.number().int().positive(),
+  questionBankId: z.coerce.number().int().positive(),
+  title: z.string().trim().min(2).max(200),
+  description: z.string().trim().max(2000).optional().nullable(),
+  questions: z.array(questionSchema.omit({ questionBankId: true, courseId: true })).min(1)
+});
+
 const assessmentSchema = z.object({
   classId: z.coerce.number().int().positive(),
   courseId: z.coerce.number().int().positive(),
@@ -403,12 +422,14 @@ module.exports = {
   courseSchema,
   courseOfferingSchema,
   classSectionSchema,
+  instructorClassSectionSchema,
   studentPlacementSchema,
   classEligibilitySchema,
   moduleSchema,
   lessonSchema,
   assignmentSchema,
   questionSchema,
+  questionSetSchema,
   assessmentSchema,
   gradeCategoriesBulkSchema,
   createAnnouncementSchema,
@@ -421,4 +442,3 @@ module.exports = {
   updateCourseOfferingSchema,
   updateClassSectionSchema
 };
-

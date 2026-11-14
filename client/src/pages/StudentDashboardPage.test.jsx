@@ -4,11 +4,15 @@ import { render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { lmsApi } from '../services/api';
-import { StudentDashboardPage } from './StudentPages';
+import { ToastProvider } from '../components/ui/SharedComponents';
+import { StudentCatalogPage, StudentDashboardPage } from './StudentPages';
 
 vi.mock('../services/api', () => ({
   lmsApi: {
-    getDashboardSummary: vi.fn()
+    getDashboardSummary: vi.fn(),
+    listCourses: vi.fn(),
+    getMyPlacements: vi.fn(),
+    enrollStudent: vi.fn()
   },
   extractErrorMessage: (error) => error?.message || 'Request failed'
 }));
@@ -23,6 +27,22 @@ function renderDashboard() {
       <MemoryRouter>
         <StudentDashboardPage />
       </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function renderCatalog() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <MemoryRouter>
+          <StudentCatalogPage />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
@@ -110,5 +130,24 @@ describe('StudentDashboardPage', () => {
     expect(screen.getByText('No upcoming assignment deadlines.')).toBeInTheDocument();
     expect(screen.getByText('No published grades yet.')).toBeInTheDocument();
     expect(screen.getByText('No recent announcements.')).toBeInTheDocument();
+  });
+
+  it('loads and displays the student’s academic placement in the course catalog', async () => {
+    lmsApi.listCourses.mockResolvedValue({ data: { courses: [] } });
+    lmsApi.getMyPlacements.mockResolvedValue({
+      data: {
+        placements: [{
+          program: { code: 'BSIT' },
+          yearLevel: 4,
+          cohortSection: '4-A',
+          academicYear: { name: '2026-2027', isCurrent: true }
+        }]
+      }
+    });
+
+    renderCatalog();
+
+    expect(await screen.findByText(/BSIT · Year 4 · Section 4-A/)).toBeInTheDocument();
+    expect(lmsApi.getMyPlacements).toHaveBeenCalledOnce();
   });
 });

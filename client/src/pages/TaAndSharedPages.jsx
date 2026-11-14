@@ -126,8 +126,9 @@ export function TaSubmissionsReviewPage() {
   const [preliminaryFeedback, setPreliminaryFeedback] = useState('');
   const [flagged, setFlagged] = useState(false);
   const [flagReason, setFlagReason] = useState('');
+  const [flagCategory, setFlagCategory] = useState('');
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['submissions', 'ta'],
     queryFn: () => lmsApi.listSubmissions()
   });
@@ -139,10 +140,12 @@ export function TaSubmissionsReviewPage() {
       const res = await lmsApi.reviewSubmission(selectedSub.id, {
         preliminaryFeedback,
         flaggedForInstructorReview: flagged,
-        flagReason
+        flagReason,
+        ...(flagged ? { flagCategory } : {})
       });
       addToast(res.message);
       setSelectedSub(null);
+      setFlagCategory('');
       queryClient.invalidateQueries({ queryKey: ['submissions'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     } catch (err) {
@@ -151,6 +154,18 @@ export function TaSubmissionsReviewPage() {
   };
 
   if (isLoading) return <LoadingState />;
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          badge="Teaching Assistant Review"
+          title="Authorized Submission Monitoring, Preliminary Feedback & Escalation"
+          subtitle="Provide preliminary rubric feedback and flag submissions requiring instructor attention."
+        />
+        <ErrorState message={extractErrorMessage(error)} onRetry={refetch} />
+      </div>
+    );
+  }
 
   const submissions = data?.data?.submissions || [];
 
@@ -199,7 +214,14 @@ export function TaSubmissionsReviewPage() {
                       setSelectedSub(s);
                       setPreliminaryFeedback(s.preliminaryFeedback || '');
                       setFlagged(Boolean(s.flaggedForInstructorReview));
-                      setFlagReason(s.flagReason || '');
+                      let storedFlag = null;
+                      try {
+                        storedFlag = s.flagReason ? JSON.parse(s.flagReason) : null;
+                      } catch {
+                        storedFlag = null;
+                      }
+                      setFlagCategory(storedFlag?.category || '');
+                      setFlagReason(storedFlag?.description || s.flagReason || '');
                     }}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold"
                   >
@@ -242,14 +264,35 @@ export function TaSubmissionsReviewPage() {
               <span>Flag this submission for Instructor Review</span>
             </label>
             {flagged && (
-              <div>
-                <label className="block font-semibold mb-1">Flag / Escalation Reason</label>
-                <input
-                  value={flagReason}
-                  onChange={(e) => setFlagReason(e.target.value)}
-                  placeholder="Describe why instructor review is needed..."
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300"
-                />
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="ta-flag-category" className="block font-semibold mb-1">Flag Category</label>
+                  <select
+                    id="ta-flag-category"
+                    required
+                    value={flagCategory}
+                    onChange={(e) => setFlagCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
+                  >
+                    <option value="">— Select a category —</option>
+                    <option value="plagiarism">Possible plagiarism</option>
+                    <option value="incomplete_submission">Incomplete submission</option>
+                    <option value="technical_issue">Technical issue</option>
+                    <option value="unusual_content">Unusual content</option>
+                    <option value="instructor_review_needed">Instructor review needed</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Flag / Escalation Reason</label>
+                  <input
+                    required
+                    minLength={3}
+                    value={flagReason}
+                    onChange={(e) => setFlagReason(e.target.value)}
+                    placeholder="Describe why instructor review is needed..."
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                  />
+                </div>
               </div>
             )}
             <button type="submit" className="w-full py-2 bg-blue-600 text-white font-semibold rounded-lg">
@@ -571,9 +614,9 @@ export function SharedMessagesPage() {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
 
-  const { data: usersData } = useQuery({
+  const { data: usersData, isLoading: isLoadingRecipients, error: recipientsError, refetch: refetchRecipients } = useQuery({
     queryKey: ['users-messaging'],
-    queryFn: () => lmsApi.listUsers({ status: 'active' }).catch(() => ({ data: { users: [] } }))
+    queryFn: lmsApi.listMessageRecipients
   });
 
   const { data, isLoading } = useQuery({
@@ -644,6 +687,7 @@ export function SharedMessagesPage() {
             <label className="block font-semibold mb-1">Recipient</label>
             <select
               required
+              disabled={isLoadingRecipients || Boolean(recipientsError)}
               value={recipientId}
               onChange={(e) => setRecipientId(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white"
@@ -655,6 +699,14 @@ export function SharedMessagesPage() {
                 </option>
               ))}
             </select>
+            {recipientsError && (
+              <div className="mt-2 text-rose-700" role="alert">
+                <p>Unable to load message recipients: {extractErrorMessage(recipientsError)}</p>
+                <button type="button" className="mt-1 font-semibold underline" onClick={() => refetchRecipients()}>
+                  Retry
+                </button>
+              </div>
+            )}
           </div>
           <div>
             <label className="block font-semibold mb-1">Subject</label>
@@ -1114,5 +1166,194 @@ export function TaResourcesPage() {
 
 /* Aliases for RyanClaud team routes — point to existing implementations */
 export { TaClassesPage as TaClassRosterPage };
-export { TaClassesPage as TaStudentProgressPage };
-export { TaClassesPage as TaStudentActivityPage };
+
+function TaStudentMonitoringPage({ mode }) {
+  const [selectedClassId, setSelectedClassId] = useState('');
+  const {
+    data: classesData,
+    isLoading: classesLoading,
+    error: classesError,
+    refetch: refetchClasses
+  } = useQuery({
+    queryKey: ['classes'],
+    queryFn: lmsApi.listClasses
+  });
+  const classes = classesData?.data?.classes || [];
+
+  React.useEffect(() => {
+    if (!selectedClassId && classes.length > 0) {
+      setSelectedClassId(String(classes[0].id));
+    }
+  }, [classes, selectedClassId]);
+
+  const {
+    data: monitoringData,
+    isLoading: monitoringLoading,
+    error: monitoringError,
+    refetch: refetchMonitoring
+  } = useQuery({
+    queryKey: ['ta-student-monitoring', selectedClassId],
+    queryFn: () => lmsApi.getTaStudentMonitoring(selectedClassId),
+    enabled: Boolean(selectedClassId)
+  });
+
+  const monitoring = monitoringData?.data;
+  const students = monitoring?.students || [];
+  const title = mode === 'progress' ? 'Student Progress' : 'Student Activity';
+  const progressValues = students
+    .map((student) => student.progress?.percentage)
+    .filter((value) => Number.isFinite(Number(value)));
+  const averageProgress = progressValues.length
+    ? Math.round(progressValues.reduce((sum, value) => sum + Number(value), 0) / progressValues.length)
+    : null;
+
+  return (
+    <div className="space-y-6 pb-8">
+      <PageHeader
+        badge="Assigned Class Monitoring"
+        title={title}
+        subtitle={mode === 'progress'
+          ? 'Review lesson completion, assignment submissions, and assessment progress for students in your assigned section.'
+          : 'Review recent student submissions, assessment activity, late work, and instructor escalations.'}
+      />
+
+      {classesLoading ? (
+        <LoadingState label="Loading your assigned classes..." />
+      ) : classesError ? (
+        <ErrorState message={extractErrorMessage(classesError)} onRetry={refetchClasses} />
+      ) : classes.length === 0 ? (
+        <div className="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center">
+          <Users className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <p className="text-sm font-semibold text-slate-500">No classes assigned yet.</p>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <label className="text-xs font-semibold text-slate-600">
+              Class Section
+              <select
+                value={selectedClassId}
+                onChange={(e) => setSelectedClassId(e.target.value)}
+                className="block mt-1 w-full sm:min-w-72 px-3 py-2 rounded-lg border border-slate-300 bg-white"
+              >
+                {classes.map((classSection) => (
+                  <option key={classSection.id} value={classSection.id}>
+                    {classSection.sectionCode} — {classSection.courseOffering?.course?.title || classSection.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {monitoring?.classSection && (
+              <p className="text-xs text-slate-500 pb-2">
+                {monitoring.classSection.courseCode} · {monitoring.classSection.name}
+              </p>
+            )}
+          </div>
+
+          {monitoringLoading ? (
+            <LoadingState label={`Loading ${title.toLowerCase()}...`} />
+          ) : monitoringError ? (
+            <ErrorState message={extractErrorMessage(monitoringError)} onRetry={refetchMonitoring} />
+          ) : mode === 'progress' ? (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <StatCard title="Students Monitored" value={students.length} icon={Users} accent="blue" />
+                <StatCard
+                  title="Average Course Progress"
+                  value={averageProgress === null ? '—' : `${averageProgress}%`}
+                  subtitle={progressValues.length ? `${progressValues.length} students with tracked progress` : 'No lesson progress recorded'}
+                  icon={BookOpen}
+                  accent="indigo"
+                />
+                <StatCard
+                  title="Published Assessments"
+                  value={monitoring?.assessments?.length || 0}
+                  subtitle={`${monitoring?.assignments?.length || 0} published assignments`}
+                  icon={ClipboardCheck}
+                  accent="emerald"
+                />
+              </div>
+              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3">Student</th>
+                      <th className="px-4 py-3">Course Progress</th>
+                      <th className="px-4 py-3">Assignments</th>
+                      <th className="px-4 py-3">Missing</th>
+                      <th className="px-4 py-3">Assessments</th>
+                      <th className="px-4 py-3">Published Results</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {students.map((student) => (
+                      <tr key={student.studentId}>
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-slate-900">{student.studentName}</p>
+                          <p className="text-slate-500">{student.studentNumber || student.studentEmail}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          {student.progress
+                            ? `${student.progress.percentage}% (${student.progress.completedLessons}/${student.progress.totalLessons} lessons)`
+                            : 'No progress recorded'}
+                        </td>
+                        <td className="px-4 py-3">{student.submissions.submitted}/{student.submissions.totalAssignments}</td>
+                        <td className="px-4 py-3">{student.submissions.missing}</td>
+                        <td className="px-4 py-3">{student.assessments.completed}/{student.assessments.totalAssessments}</td>
+                        <td className="px-4 py-3">{student.assessments.publishedResults}</td>
+                      </tr>
+                    ))}
+                    {students.length === 0 && (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No enrolled students found for this class.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 uppercase border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Student</th>
+                    <th className="px-4 py-3">Latest Assignment Submission</th>
+                    <th className="px-4 py-3">Latest Assessment</th>
+                    <th className="px-4 py-3">Late</th>
+                    <th className="px-4 py-3">Flagged</th>
+                    <th className="px-4 py-3">In Progress</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {students.map((student) => (
+                    <tr key={student.studentId}>
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-900">{student.studentName}</p>
+                        <p className="text-slate-500">{student.studentNumber || student.studentEmail}</p>
+                      </td>
+                      <td className="px-4 py-3">{student.lastActivity.submissionDate ? new Date(student.lastActivity.submissionDate).toLocaleString() : 'No submissions'}</td>
+                      <td className="px-4 py-3">{student.lastActivity.assessmentDate ? new Date(student.lastActivity.assessmentDate).toLocaleString() : 'No attempts'}</td>
+                      <td className="px-4 py-3">{student.submissions.late}</td>
+                      <td className="px-4 py-3">{student.submissions.flagged}</td>
+                      <td className="px-4 py-3">{student.assessments.inProgress}</td>
+                    </tr>
+                  ))}
+                  {students.length === 0 && (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No student activity found for this class.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+export function TaStudentProgressPage() {
+  return <TaStudentMonitoringPage mode="progress" />;
+}
+
+export function TaStudentActivityPage() {
+  return <TaStudentMonitoringPage mode="activity" />;
+}

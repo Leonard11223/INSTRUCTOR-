@@ -1,6 +1,24 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+const fs = require('fs');
+const path = require('path');
 
 const { app, sessionStore } = require('../src/app');
+const env = require('../src/config/env');
+const { getResourceTypeForUpload } = require('../src/controllers/content.controller');
+const {
+  Assessment,
+  AssessmentQuestion,
+  ClassSection,
+  CourseOffering,
+  LearningResource,
+  Module,
+  Question,
+  QuestionOption,
+  QuestionSet,
+  QuestionSetQuestion,
+  TeachingAssistantAssignment,
+  User
+} = require('../src/models');
 const resetDatabase = require('../src/utils/resetDatabase');
 const { createAgent } = require('./testAgent');
 
@@ -51,6 +69,39 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       }
     });
 
+    it('returns assigned-class monitoring to TAs and enforces the roster permission', async () => {
+      const classesRes = await taAgent.get('/api/classes');
+      expect(classesRes.status).toBe(200);
+      const classId = classesRes.body.data.classes[0].id;
+      const monitoringRes = await taAgent.get(`/api/dashboards/ta-student-monitoring/${classId}`);
+
+      expect(monitoringRes.status).toBe(200);
+      expect(monitoringRes.body.data.classId).toBe(classId);
+      expect(monitoringRes.body.data.students.length).toBeGreaterThan(0);
+      expect(monitoringRes.body.data.students[0]).toHaveProperty('progress');
+      expect(monitoringRes.body.data.students[0]).toHaveProperty('lastActivity');
+
+      const ta = await User.findOne({ where: { email: 'ta@academy.edu' } });
+      const taAssignment = await TeachingAssistantAssignment.findOne({
+        where: { taUserId: ta.id, classId }
+      });
+      const originalCanViewRoster = taAssignment.canViewRoster;
+      await taAssignment.update({ canViewRoster: false });
+      try {
+        const classesWithoutRosterRes = await taAgent.get('/api/classes');
+        expect(classesWithoutRosterRes.status).toBe(200);
+        const restrictedClass = classesWithoutRosterRes.body.data.classes.find((classSection) => classSection.id === classId);
+        expect(restrictedClass).toBeDefined();
+        expect(restrictedClass.memberships).toEqual([]);
+
+        const restrictedRes = await taAgent.get(`/api/dashboards/ta-student-monitoring/${classId}`);
+        expect(restrictedRes.status).toBe(403);
+        expect(restrictedRes.body.code).toBe('TA_PERMISSION_DENIED');
+      } finally {
+        await taAssignment.update({ canViewRoster: originalCanViewRoster });
+      }
+    });
+
     it('returns student deadlines separated by date and labels recent announcements accurately', async () => {
       const res = await studentAgent.get('/api/dashboards/summary');
       expect(res.status).toBe(200);
@@ -92,6 +143,27 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       expect(placementsRes.status).toBe(200);
       expect(placementsRes.body.data.placements).toHaveLength(1);
       expect(placementsRes.body.data.placements[0].studentId).toBe(meRes.body.data.user.id);
+    });
+
+    it('lists minimal active messaging recipients for authorized users only', async () => {
+      const meRes = await studentAgent.get('/api/auth/me');
+      const recipientsRes = await studentAgent.get('/api/messages/recipients');
+
+      expect(recipientsRes.status).toBe(200);
+      expect(recipientsRes.body.data.users.length).toBeGreaterThan(0);
+      expect(recipientsRes.body.data.users.some((user) => user.id === meRes.body.data.user.id)).toBe(false);
+      expect(recipientsRes.body.data.users[0]).toEqual(expect.objectContaining({
+        id: expect.any(Number),
+        firstName: expect.any(String),
+        lastName: expect.any(String),
+        primaryRole: expect.any(String)
+      }));
+      expect(recipientsRes.body.data.users[0]).not.toHaveProperty('email');
+      expect(recipientsRes.body.data.users[0]).not.toHaveProperty('passwordHash');
+
+      expect((await instructorAgent.get('/api/messages/recipients')).status).toBe(200);
+      expect((await taAgent.get('/api/messages/recipients')).status).toBe(200);
+      expect((await anonAgent.get('/api/messages/recipients')).status).toBe(401);
     });
   });
 
@@ -161,6 +233,7 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       const unplacedEnrollRes = await ariaAgent.post('/api/enrollments').send({ classId: 2 });
       expect(unplacedEnrollRes.status).toBe(403);
       expect(unplacedEnrollRes.body.code).toBe('PLACEMENT_REQUIRED');
+      expect(unplacedEnrollRes.body.message).toContain('class join code');
 
       const [yearsRes, programsRes] = await Promise.all([
         acadAdminAgent.get('/api/academic-years'),
@@ -206,9 +279,119 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       expect(dupRes.status).toBe(409);
       expect(dupRes.body.code).toBe('DUPLICATE_ENROLLMENT');
     });
+
+    it('lets instructors create a section under a published offering and assigns it to themselves', async () => {
+      const offeringsRes = await instructorAgent.get('/api/course-offerings');
+      expect(offeringsRes.status).toBe(200);
+      const offering = offeringsRes.body.data.offerings.find((item) => item.status === 'published');
+      expect(offering).toBeDefined();
+
+      const sectionCode = `TMP-${Date.now()}`;
+      const createRes = await instructorAgent.post('/api/classes/instructor').send({
+        courseOfferingId: offering.id,
+        sectionCode,
+        name: `Temporary test section ${sectionCode}`,
+        capacity: 25
+      });
+
+      expect(createRes.status).toBe(201);
+      const classId = createRes.body.data.classSection.id;
+      expect(createRes.body.data.classSection.joinCodeEnabled).toBe(true);
+      expect(createRes.body.data.classSection.joinCode).toMatch(/^[A-F0-9]{8}$/);
+      const classesRes = await instructorAgent.get('/api/classes');
+      expect(classesRes.status).toBe(200);
+      const createdClass = classesRes.body.data.classes.find((item) => item.id === classId);
+      expect(createdClass).toBeDefined();
+      expect(createdClass.instructorAssignments).toHaveLength(1);
+      expect(createdClass.instructorAssignments[0].instructor.email).toBe('instructor@academy.edu');
+
+      const detailRes = await instructorAgent.get(`/api/classes/${classId}`);
+      expect(detailRes.status).toBe(200);
+      expect(detailRes.body.data.classSection.gradeCategories).toHaveLength(4);
+
+      const joinRes = await student2Agent.post('/api/join-class').send({
+        joinCode: createRes.body.data.classSection.joinCode
+      });
+      expect(joinRes.status).toBe(201);
+      expect(joinRes.body.data.status).toBe('pending');
+      expect(joinRes.body.data.classSection.id).toBe(classId);
+
+      const approveRes = await instructorAgent.post(
+        `/api/enrollments/${joinRes.body.data.membership.id}/approve`
+      );
+      expect(approveRes.status).toBe(200);
+      expect(approveRes.body.data.membership.status).toBe('enrolled');
+
+      const forbiddenRes = await anonAgent.post('/api/classes/instructor').send({
+        courseOfferingId: offering.id,
+        sectionCode: `${sectionCode}-ST`,
+        name: 'Student created section'
+      });
+      expect(forbiddenRes.status).toBe(401);
+    });
+
+    it('lets instructors create a term offering and class section directly from a published course', async () => {
+      const courseCode = `INLINE-${Date.now()}`;
+      const courseRes = await instructorAgent.post('/api/courses').send({
+        departmentId: 1,
+        programId: 1,
+        code: courseCode,
+        title: `Inline Offering Test ${courseCode}`,
+        description: 'Testing the instructor course-to-class offering workflow.'
+      });
+      expect(courseRes.status).toBe(201);
+
+      const yearsRes = await instructorAgent.get('/api/academic-years');
+      const year = yearsRes.body.data.academicYears.find(
+        (item) => ['active', 'upcoming'].includes(item.status)
+      );
+      expect(year).toBeDefined();
+      const semester = year.semesters.find((item) => ['active', 'upcoming'].includes(item.status));
+      expect(semester).toBeDefined();
+
+      const sectionCode = `INLINE-${Date.now()}`;
+      const createRes = await instructorAgent.post('/api/classes/instructor').send({
+        courseId: courseRes.body.data.course.id,
+        academicYearId: year.id,
+        semesterId: semester.id,
+        sectionCode,
+        name: `Inline test section ${sectionCode}`,
+        capacity: 25
+      });
+
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.data.courseOffering).toEqual(expect.objectContaining({
+        courseId: courseRes.body.data.course.id,
+        academicYearId: year.id,
+        semesterId: semester.id,
+        status: 'published'
+      }));
+      expect(createRes.body.data.classSection.courseOfferingId).toBe(createRes.body.data.courseOffering.id);
+
+      const nextSectionRes = await instructorAgent.post('/api/classes/instructor').send({
+        courseId: courseRes.body.data.course.id,
+        academicYearId: year.id,
+        semesterId: semester.id,
+        sectionCode: `${sectionCode}-B`,
+        name: `Second inline test section ${sectionCode}`,
+        capacity: 25
+      });
+
+      expect(nextSectionRes.status).toBe(201);
+      expect(nextSectionRes.body.data.courseOffering.id).toBe(createRes.body.data.courseOffering.id);
+    });
   });
 
   describe('4. Learning Content Authoring, XSS Sanitization & Student Progress Tracking', () => {
+    it('maps uploaded lesson file extensions to supported learning resource types', () => {
+      expect(getResourceTypeForUpload('lesson.pdf')).toBe('pdf');
+      expect(getResourceTypeForUpload('slides.pptx')).toBe('presentation');
+      expect(getResourceTypeForUpload('activities.xlsx')).toBe('worksheet');
+      expect(getResourceTypeForUpload('guide.docx')).toBe('document');
+      expect(getResourceTypeForUpload('script.py')).toBe('code');
+      expect(getResourceTypeForUpload('topology.pkt')).toBe('packet_tracer');
+    });
+
     it('sanitizes executable script tags when an instructor creates a lesson', async () => {
       const lessonRes = await instructorAgent.post('/api/lessons').send({
         moduleId: 1,
@@ -221,6 +404,46 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
       expect(lessonRes.status).toBe(201);
       expect(lessonRes.body.data.lesson.contentHtml).not.toContain('<script>');
       expect(lessonRes.body.data.lesson.contentHtml).not.toContain('onclick=');
+    });
+
+    it('serves lesson PDFs inline only to users with access to the matching class', async () => {
+      const classSection = await ClassSection.findByPk(1, {
+        include: [{ model: CourseOffering, as: 'courseOffering' }]
+      });
+      const storedFilename = `preview-${process.pid}-${Date.now()}.pdf`;
+      const filePath = path.join(env.UPLOAD_DIR, storedFilename);
+      fs.mkdirSync(env.UPLOAD_DIR, { recursive: true });
+      fs.writeFileSync(filePath, '%PDF-1.4 preview test');
+
+      let resource;
+      try {
+        resource = await LearningResource.create({
+          courseId: classSection.courseOffering.courseId,
+          title: 'Preview test.pdf',
+          resourceType: 'pdf',
+          storedFilename,
+          originalFilename: 'Preview test.pdf',
+          mimeType: 'application/pdf'
+        });
+
+        const missingClassRes = await studentAgent.get(`/api/resources/${resource.id}/preview`);
+        expect(missingClassRes.status).toBe(400);
+
+        const previewRes = await studentAgent.get(
+          `/api/resources/${resource.id}/preview?classId=${classSection.id}`
+        );
+        expect(previewRes.status).toBe(200);
+        expect(previewRes.headers['content-type']).toContain('application/pdf');
+        expect(previewRes.headers['content-disposition']).toBe('inline');
+
+        const inaccessibleClassRes = await instructor2Agent.get(
+          `/api/resources/${resource.id}/preview?classId=${classSection.id}`
+        );
+        expect(inaccessibleClassRes.status).toBe(403);
+      } finally {
+        if (resource) await resource.destroy();
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
     });
 
     it('updates student lesson completion and recalculates course progress', async () => {
@@ -285,6 +508,170 @@ describe('Aetheria Academy LMS - Comprehensive Backend & Security Integration Su
   });
 
   describe('6. Quiz & Examination Engine (Server-Timed, Answer Key Protection & Auto-Grading)', () => {
+    it('saves only selected generated questions as a reusable course question set', async () => {
+      const createRes = await instructorAgent.post('/api/question-sets').send({
+        courseId: 1,
+        questionBankId: 1,
+        title: 'Selected Generated Question Set Test',
+        description: 'Regression test for selected generated questions.',
+        questions: [
+          {
+            topic: 'Routing',
+            questionType: 'multiple_choice',
+            difficulty: 'Easy',
+            prompt: 'Which protocol selects routes using link-state information?',
+            points: 2,
+            options: [
+              { optionText: 'OSPF', isCorrect: true },
+              { optionText: 'FTP', isCorrect: false }
+            ]
+          },
+          {
+            topic: 'Routing',
+            questionType: 'multiple_choice',
+            difficulty: 'Medium',
+            prompt: 'Which algorithm is used by OSPF to calculate shortest paths?',
+            points: 2,
+            options: [
+              { optionText: 'Dijkstra', isCorrect: true },
+              { optionText: 'AES', isCorrect: false }
+            ]
+          }
+        ]
+      });
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.data.questionSet.questions).toHaveLength(2);
+      expect(createRes.body.data.questionSet.questions[0].options).toHaveLength(2);
+
+      const listRes = await instructorAgent.get('/api/question-sets?courseId=1');
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.data.questionSets.some((set) => (
+        set.title === 'Selected Generated Question Set Test' && set.questions.length === 2
+      ))).toBe(true);
+
+      const set = await QuestionSet.findOne({ where: { title: 'Selected Generated Question Set Test' } });
+      const setQuestions = await QuestionSetQuestion.findAll({ where: { questionSetId: set.id } });
+      const questionIds = setQuestions.map((item) => item.questionId);
+      try {
+        expect(questionIds).toHaveLength(2);
+        expect(await Question.count({ where: { id: questionIds, questionBankId: 1, courseId: 1 } })).toBe(2);
+      } finally {
+        await QuestionSetQuestion.destroy({ where: { questionSetId: set.id } });
+        await QuestionOption.destroy({ where: { questionId: questionIds } });
+        await Question.destroy({ where: { id: questionIds } });
+        await set.destroy();
+      }
+    });
+
+    it('requires questions before publishing an assessment and allows publishing after questions are attached', async () => {
+      const payload = {
+        classId: 1,
+        courseId: 1,
+        title: 'Guided Assessment Publishing Test',
+        assessmentType: 'quiz',
+        instructions: 'Answer the question to complete this quiz.',
+        closeDate: '2027-12-31T23:59:00Z',
+        timeLimitMinutes: 15,
+        maxScore: 100,
+        maxAttempts: 1
+      };
+
+      const publishedCreateRes = await instructorAgent
+        .post('/api/assessments')
+        .send({ ...payload, publicationStatus: 'published' });
+      expect(publishedCreateRes.status).toBe(400);
+
+      const createRes = await instructorAgent
+        .post('/api/assessments')
+        .send({ ...payload, publicationStatus: 'draft' });
+      expect(createRes.status).toBe(201);
+      const assessmentId = createRes.body.data.assessment.id;
+
+      try {
+        const publishEmptyRes = await instructorAgent
+          .put(`/api/assessments/${assessmentId}`)
+          .send({ publicationStatus: 'published' });
+        expect(publishEmptyRes.status).toBe(400);
+
+        const publishWithQuestionsRes = await instructorAgent
+          .put(`/api/assessments/${assessmentId}`)
+          .send({ questionIds: [7], publicationStatus: 'published' });
+        expect(publishWithQuestionsRes.status).toBe(200);
+        expect(publishWithQuestionsRes.body.data.assessment.publicationStatus).toBe('published');
+      } finally {
+        await AssessmentQuestion.destroy({ where: { assessmentId } });
+        await Assessment.destroy({ where: { id: assessmentId } });
+      }
+    });
+
+    it('links module quizzes to a module in the same course and rejects mismatched course associations', async () => {
+      const courseModule = await Module.findOne({ where: { courseId: 1 } });
+      const otherCourseModule = await Module.findOne({ where: { courseId: 2 } });
+      expect(courseModule).toBeDefined();
+      expect(otherCourseModule).toBeDefined();
+
+      const basePayload = {
+        classId: 1,
+        courseId: 1,
+        title: 'Module Quiz Association Test',
+        assessmentType: 'quiz',
+        instructions: 'Complete this module quiz association test.',
+        closeDate: '2027-12-31T23:59:00Z',
+        publicationStatus: 'draft'
+      };
+      let assessmentId;
+      try {
+        const createRes = await instructorAgent
+          .post('/api/assessments')
+          .send({ ...basePayload, moduleId: courseModule.id });
+        expect(createRes.status).toBe(201);
+        assessmentId = createRes.body.data.assessment.id;
+        expect(createRes.body.data.assessment.moduleId).toBe(courseModule.id);
+
+        const updateRes = await instructorAgent
+          .put(`/api/assessments/${assessmentId}`)
+          .send({ moduleId: otherCourseModule.id });
+        expect(updateRes.status).toBe(400);
+
+        const wrongModuleRes = await instructorAgent
+          .post('/api/assessments')
+          .send({ ...basePayload, moduleId: otherCourseModule.id });
+        expect(wrongModuleRes.status).toBe(400);
+
+        const wrongCourseRes = await instructorAgent
+          .post('/api/assessments')
+          .send({ ...basePayload, courseId: 2, moduleId: otherCourseModule.id });
+        expect(wrongCourseRes.status).toBe(400);
+      } finally {
+        if (assessmentId) {
+          await AssessmentQuestion.destroy({ where: { assessmentId } });
+          await Assessment.destroy({ where: { id: assessmentId } });
+        }
+      }
+    });
+
+    it('adds selected question-bank questions to an assessment without duplicating them', async () => {
+      const assessmentId = 1;
+      try {
+        const addQuestionsRes = await instructorAgent
+          .put(`/api/assessments/${assessmentId}`)
+          .send({ questionIds: [7] });
+        expect(addQuestionsRes.status).toBe(200);
+
+        const repeatAddRes = await instructorAgent
+          .put(`/api/assessments/${assessmentId}`)
+          .send({ questionIds: [7] });
+        expect(repeatAddRes.status).toBe(200);
+
+        const startRes = await student2Agent.post(`/api/assessments/${assessmentId}/start`);
+        expect(startRes.status).toBe(200);
+        expect(startRes.body.data.questions).toHaveLength(7);
+        expect(startRes.body.data.questions.some((question) => question.questionId === 7)).toBe(true);
+      } finally {
+        await AssessmentQuestion.destroy({ where: { assessmentId, questionId: 7 } });
+      }
+    });
+
     it('starts a quiz attempt for student2 without exposing answer keys and auto-grades upon submission', async () => {
       const startRes = await student2Agent.post('/api/assessments/1/start');
       expect(startRes.status).toBe(200);

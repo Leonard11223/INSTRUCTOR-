@@ -64,6 +64,7 @@ export const lmsApi = {
   // ── Academic Management ───────────────────────────────────────────────────
   getPublicCatalog: () => apiClient.get('/public/catalog').then((r) => r.data),
   getInstitution: () => apiClient.get('/institutions').then((r) => r.data),
+  getMyPlacements: () => apiClient.get('/student/placements').then((r) => r.data),
   updateInstitution: (data) => apiClient.put('/institutions', data).then((r) => r.data),
   listDepartments: () => apiClient.get('/departments').then((r) => r.data),
   createDepartment: (data) => apiClient.post('/departments', data).then((r) => r.data),
@@ -97,6 +98,7 @@ export const lmsApi = {
   createClass: (data) => apiClient.post('/classes', data).then((r) => r.data),
   updateClass: (id, data) => apiClient.put(`/classes/${id}`, data).then((r) => r.data),
   deleteClass: (id) => apiClient.delete(`/classes/${id}`).then((r) => r.data),
+  createInstructorClass: (data) => apiClient.post('/classes/instructor', data).then((r) => r.data),
   assignInstructor: (classId, data) => apiClient.post(`/classes/${classId}/instructors`, data).then((r) => r.data),
   assignTa: (classId, data) => apiClient.post(`/classes/${classId}/teaching-assistants`, data).then((r) => r.data),
   listEnrollments: (params) => apiClient.get('/enrollments', { params }).then((r) => r.data),
@@ -121,6 +123,8 @@ export const lmsApi = {
   updateLesson: (id, data) => apiClient.put(`/lessons/${id}`, data).then((r) => r.data),
   deleteLesson: (id) => apiClient.delete(`/lessons/${id}`).then((r) => r.data),
   listResources: (params) => apiClient.get('/resources', { params }).then((r) => r.data),
+  getResourcePreview: (id, params) =>
+    apiClient.get(`/resources/${id}/preview`, { params, responseType: 'text' }).then((r) => r.data),
   createResource: (formData) =>
     apiClient.post('/resources', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data),
   updateLessonProgress: (data) => apiClient.post('/progress/lessons', data).then((r) => r.data),
@@ -143,6 +147,8 @@ export const lmsApi = {
   // ── Question Banks & Questions ────────────────────────────────────────────
   listQuestionBanks: (params) => apiClient.get('/question-banks', { params }).then((r) => r.data),
   createQuestionBank: (data) => apiClient.post('/question-banks', data).then((r) => r.data),
+  listQuestionSets: (params) => apiClient.get('/question-sets', { params }).then((r) => r.data),
+  createQuestionSet: (data) => apiClient.post('/question-sets', data).then((r) => r.data),
   createQuestion: (data) => apiClient.post('/questions', data).then((r) => r.data),
   updateQuestion: (id, data) => apiClient.put(`/questions/${id}`, data).then((r) => r.data),
   deleteQuestion: (id) => apiClient.delete(`/questions/${id}`).then((r) => r.data),
@@ -225,6 +231,7 @@ export const lmsApi = {
   attachFileToLesson: (lessonId, formData) =>
     apiClient.post(`/lessons/${lessonId}/attach-file`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data),
   listMessages: () => apiClient.get('/messages').then((r) => r.data),
+  listMessageRecipients: () => apiClient.get('/messages/recipients').then((r) => r.data),
   sendMessage: (data) => apiClient.post('/messages', data).then((r) => r.data),
   listNotifications: () => apiClient.get('/notifications').then((r) => r.data),
   markNotificationRead: (id) => apiClient.put(`/notifications/${id}/read`).then((r) => r.data)

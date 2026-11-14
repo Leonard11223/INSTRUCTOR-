@@ -112,6 +112,7 @@ router.delete('/course-offerings/:id', requireAuth, requirePermission('courses:m
 router.get('/classes', requireAuth, acadCtrl.listClasses);
 router.get('/classes/:id', requireAuth, acadCtrl.getClassById);
 router.post('/classes', requireAuth, requirePermission('classes:manage'), acadCtrl.createClassSection);
+router.post('/classes/instructor', requireAuth, requireRole('instructor'), acadCtrl.createInstructorClassSection);
 router.put('/classes/:id', requireAuth, requirePermission('classes:manage'), acadCtrl.updateClassSection);
 router.delete('/classes/:id', requireAuth, requirePermission('classes:manage'), acadCtrl.deleteClassSection);
 router.post('/classes/:id/instructors', requireAuth, requirePermission('classes:manage'), acadCtrl.assignInstructorToClass);
@@ -147,6 +148,7 @@ router.post('/lessons/:id/attach-file', requireAuth, requirePermission('content:
 router.get('/resources', requireAuth, contentCtrl.listResources);
 router.post('/resources', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), uploadMiddleware.single('file'), contentCtrl.createResource);
 router.get('/resources/:id/download', requireAuth, contentCtrl.downloadResourceFile);
+router.get('/resources/:id/preview', requireAuth, contentCtrl.previewResourceFile);
 
 router.post('/progress/lessons', requireAuth, contentCtrl.updateLessonProgress);
 router.get('/progress', requireAuth, contentCtrl.getProgressAnalytics);
@@ -166,6 +168,8 @@ router.get('/submissions/:id/escalation-history', requireAuth, assessCtrl.getEsc
 
 router.get('/question-banks', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), assessCtrl.listQuestionBanks);
 router.post('/question-banks', requireAuth, requirePermission('questions:manage'), assessCtrl.createQuestionBank);
+router.get('/question-sets', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), assessCtrl.listQuestionSets);
+router.post('/question-sets', requireAuth, requirePermission('questions:manage'), assessCtrl.createQuestionSet);
 router.post('/questions', requireAuth, requirePermission('questions:manage'), assessCtrl.createQuestion);
 router.put('/questions/:id', requireAuth, requirePermission('questions:manage'), assessCtrl.updateQuestion);
 router.delete('/questions/:id', requireAuth, requirePermission('questions:manage'), assessCtrl.deleteQuestion);
@@ -211,6 +215,7 @@ router.get('/discussions/:threadId/moderation-history', requireAuth, commCtrl.ge
 router.put('/discussions/posts/:postId/endorse', requireAuth, requireRole('super_admin', 'academic_admin', 'instructor', 'teaching_assistant'), commCtrl.endorseDiscussionPost);
 
 router.get('/messages', requireAuth, commCtrl.listConversations);
+router.get('/messages/recipients', requireAuth, requirePermission('messages:use'), commCtrl.listMessageRecipients);
 router.post('/messages', requireAuth, commCtrl.startOrSendMessage);
 
 router.get('/notifications', requireAuth, commCtrl.listNotifications);
@@ -241,4 +246,3 @@ router.post('/enrollments/:membershipId/reject', requireAuth, requireRole('super
 router.post('/join-class', requireAuth, requireRole('student'), joinCodeCtrl.joinClassByCode);
 
 module.exports = router;
-

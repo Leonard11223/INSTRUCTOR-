@@ -83,6 +83,7 @@ const NAVIGATION_BY_ROLE = {
         { to: '/ta/activity',  label: 'Student Activity'  }
       ]
     },
+    { to: '/ta/resources', label: 'Learning Resources', icon: BookOpen },
     {
       id: 'ta-submissions',
       label: 'Submissions',
