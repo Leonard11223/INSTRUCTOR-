@@ -1,4 +1,6 @@
 ﻿import React, { useState } from 'react';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -213,7 +215,7 @@ export function InstructorCourseStudioPage() {
   const [delLes, setDelLes] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [modForm, setModForm] = useState({ title:'', description:'', orderIndex:1, estimatedMinutes:60 });
-  const [lesForm, setLesForm] = useState({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'<h2>Objectives</h2>', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' });
+  const [lesForm, setLesForm] = useState({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' });
   const [lesFile, setLesFile] = useState(null);
   const [courseForm, setCourseForm] = useState({ title:'', code:'', description:'', category:'networking', creditUnits:3, deliveryMode:'Instructor-Led', level:'Intermediate', departmentId:'' });
   const [newCourseResult, setNewCourseResult] = useState(null); // holds { course, joinCode } after creation
@@ -465,7 +467,7 @@ export function InstructorCourseStudioPage() {
           <button type="button" onClick={() => { setModForm({ title:'', description:'', orderIndex:1, estimatedMinutes:60 }); setModOpen(true); }} className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" /> Module
           </button>
-          <button type="button" onClick={() => { setLesForm({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'<h2>Objectives</h2>', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' }); setLesOpen(true); }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
+          <button type="button" onClick={() => { setLesForm({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' }); setLesOpen(true); }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" /> Lesson
           </button>
           <button type="button" onClick={() => setCourseOpen(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
@@ -829,7 +831,25 @@ export function InstructorCourseStudioPage() {
             </div>
           </div>
           <div><label className="block font-semibold mb-1.5">Title</label><input required value={lesForm.title} onChange={e => setLesForm({ ...lesForm, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
-          <div><label className="block font-semibold mb-1.5">Content HTML</label><textarea rows={4} required value={lesForm.contentHtml} onChange={e => setLesForm({ ...lesForm, contentHtml: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-[11px]" /></div>
+          <div>
+  <label className="block font-semibold mb-1.5">Lesson Content</label>
+  <div className="mb-10">
+    <ReactQuill
+      theme="snow"
+      value={lesForm.contentHtml}
+      onChange={(val) => setLesForm(p => ({ ...p, contentHtml: val }))}
+      className="bg-white"
+      style={{minHeight: '160px'}}
+      modules={{
+        toolbar: [
+          ['bold', 'italic', 'underline'],
+          [{ list: 'ordered' }, { list: 'bullet' }],
+          [{ header: [2, 3, false] }]
+        ]
+      }}
+    />
+  </div>
+</div>
           {(lesForm.lessonType === 'laboratory' || lesForm.lessonType === 'demonstration') && (
           <div><label className="block font-semibold mb-1.5">Code Snippet / Script</label><textarea rows={3} value={lesForm.codeSnippet} onChange={e => setLesForm({ ...lesForm, codeSnippet: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono bg-slate-900 text-emerald-400 text-[11px]" /></div>
           )}
