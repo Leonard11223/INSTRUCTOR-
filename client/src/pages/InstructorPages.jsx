@@ -1222,7 +1222,7 @@ export function InstructorAssignmentsPage() {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div><label className="block font-semibold mb-1.5">Type</label>
-          <select value={form.assignmentType} onChange={e=>setForm(p=>({...p,assignmentType:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+          <select value={form.assignmentType} onChange={e=>setForm(p=>({...p,assignmentType:e.target.value,starterCode:''}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
             <option value="written_work">Written Work</option><option value="laboratory">Laboratory</option><option value="performance_task">Performance Task</option><option value="project">Project</option><option value="recitation">Recitation</option><option value="case_study">Case Study</option>
           </select></div>
         <div><label className="block font-semibold mb-1.5">Due Date</label><input type="date" required value={form.dueDate} onChange={e=>setForm(p=>({...p,dueDate:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
@@ -1233,8 +1233,8 @@ export function InstructorAssignmentsPage() {
       <div><label className="block font-semibold mb-1.5">Instructions</label>
         <textarea required rows={3} value={form.instructions} onChange={e=>setForm(p=>({...p,instructions:e.target.value}))} placeholder="Describe the task, requirements, and how students should submit their work..." className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/>
       </div>
-      <div><label className="block font-semibold mb-1.5">Reference Material / Template <span className="text-slate-400 font-normal">(optional)</span></label>
-        <textarea rows={3} value={form.starterCode} onChange={e=>setForm(p=>({...p,starterCode:e.target.value}))} placeholder="e.g., formula, template, instructions, or leave blank" className="w-full px-3 py-2 rounded-lg border border-slate-300"/>
+      <div><label className="block font-semibold mb-1.5">{form.assignmentType==='laboratory'?'Starter Code':<>Reference Material / Template <span className="text-slate-400 font-normal">(optional)</span></>}</label>
+        <textarea rows={3} value={form.starterCode} onChange={e=>setForm(p=>({...p,starterCode:e.target.value}))} placeholder={form.assignmentType==='laboratory'?'// Write your starter code here...':'e.g., essay format, case study template, formula sheet, or leave blank'} className={form.assignmentType==='laboratory'?'w-full px-3 py-2 rounded-lg border border-slate-300 font-mono bg-slate-900 text-emerald-400 text-[12px]':'w-full px-3 py-2 rounded-lg border border-slate-300'}/>
       </div>
       <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editItem?'Update Assignment':'Publish Assignment'}</button>
     </form>
