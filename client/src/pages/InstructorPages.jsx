@@ -62,6 +62,10 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message }) {
   );
 }
 const CHART_COLORS = ['#2563eb','#7c3aed','#059669','#d97706','#dc2626'];
+function formatDate(dt) {
+  if (!dt) return 'Never';
+  return new Date(dt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
 
 /* ══════════════════════════════════════════════════════════════
    1. DASHBOARD
@@ -81,14 +85,18 @@ export function InstructorDashboardPage() {
   const assess=d.upcomingAssessments||[], threads=d.recentQuestions||[];
   const courses=d.assignedCourses||[];
   const flagged=pending.filter(s=>s.flaggedForInstructorReview);
-  const highPass=stats.filter(c=>c.averageProgress>75).length;
-  const midPass=Math.max(0,stats.filter(c=>c.averageProgress>50).length-highPass);
-  const buckets=[
-    {name:'0–25%', value:support.filter(s=>s.progressPercentage<=25).length},
-    {name:'26–50%',value:support.filter(s=>s.progressPercentage>25&&s.progressPercentage<=50).length},
-    {name:'51–75%',value:midPass},
-    {name:'76–100%',value:highPass},
-  ].filter(b=>b.value>0);
+  const highPass = stats
+    .filter(c => c.averageProgress > 75)
+    .reduce((sum, c) => sum + (c.enrolledCount || 0), 0);
+  const midPass = stats
+    .filter(c => c.averageProgress > 50 && c.averageProgress <= 75)
+    .reduce((sum, c) => sum + (c.enrolledCount || 0), 0);
+  const buckets = [
+    { name: '0–25%',    value: support.filter(s => s.progressPercentage < 25).length },
+    { name: '26–50%',   value: support.filter(s => s.progressPercentage >= 25).length },
+    { name: '51–75% (est.)',  value: midPass },
+    { name: '76–100% (est.)', value: highPass },
+  ].filter(b => b.value > 0);
   return (
     <div className="space-y-6 pb-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200">
@@ -99,7 +107,7 @@ export function InstructorDashboardPage() {
         {[
           {label:'Courses / Classes',value:`${m.assignedCoursesCount??0} / ${m.activeClassesCount??0}`,sub:`${m.enrolledStudentsCount??0} learners`,icon:BookOpen,accent:'bg-blue-50 text-blue-600 border-blue-100',bar:'bg-blue-500',bval:m.activeClassesCount?Math.min(100,(m.activeClassesCount/10)*100):0},
           {label:'Pending Review',value:m.pendingSubmissionsCount??0,sub:flagged.length>0?`${flagged.length} TA-flagged`:`${m.pendingGradingTasksCount??0} tasks`,icon:ClipboardCheck,accent:m.pendingSubmissionsCount>0?'bg-amber-50 text-amber-600 border-amber-100':'bg-slate-50 text-slate-400 border-slate-100',bar:'bg-amber-400',bval:m.pendingGradingTasksCount?Math.min(100,(m.pendingSubmissionsCount/m.pendingGradingTasksCount)*100):0},
-          {label:'Assessments',value:m.upcomingAssessmentsCount??0,sub:m.overdueActivitiesCount>0?`${m.overdueActivitiesCount} overdue`:'None overdue',icon:Clock,accent:'bg-indigo-50 text-indigo-600 border-indigo-100',bar:'bg-indigo-500',bval:m.upcomingAssessmentsCount?70:0},
+          {label:'Assessments',value:m.upcomingAssessmentsCount??0,sub:m.overdueActivitiesCount>0?`${m.overdueActivitiesCount} overdue`:'None overdue',icon:Clock,accent:'bg-indigo-50 text-indigo-600 border-indigo-100',bar:'bg-indigo-500',bval:Math.min(100, (m.upcomingAssessmentsCount / 10) * 100)},
           {label:'At-Risk Learners',value:support.length,sub:'Below 50%',icon:AlertCircle,accent:support.length>0?'bg-rose-50 text-rose-600 border-rose-100':'bg-slate-50 text-slate-400 border-slate-100',bar:'bg-rose-400',bval:m.enrolledStudentsCount?(support.length/m.enrolledStudentsCount)*100:0},
         ].map(card=>(
           <div key={card.label} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow transition-shadow">
@@ -179,7 +187,9 @@ export function InstructorDashboardPage() {
       {support.length>0&&(
         <div className="bg-white rounded-xl border border-rose-200 p-5 shadow-sm">
           <div className="flex items-start justify-between mb-4"><div><div className="flex items-center gap-2 mb-1"><AlertCircle className="w-4 h-4 text-rose-500"/><h2 className="text-sm font-bold text-slate-900">At-Risk Learner Indicators</h2></div><p className="text-xs text-slate-500">Below 50% completion — consider proactive check-ins.</p></div><Link to="/instructor/gradebook" className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline shrink-0">Gradebook <ArrowUpRight className="w-3 h-3"/></Link></div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">{support.map((st,i)=>(<div key={i} className="p-3.5 rounded-lg bg-rose-50/60 border border-rose-200 text-xs space-y-2"><div className="flex items-center justify-between"><span className="font-bold text-slate-900 truncate">{st.studentName}</span><span className={`font-mono font-bold text-sm ${st.progressPercentage<25?'text-rose-700':'text-amber-700'}`}>{st.progressPercentage}%</span></div><ProgressBar value={st.progressPercentage} color={st.progressPercentage<25?'bg-rose-400':'bg-amber-400'}/><p className="text-slate-500 truncate">{st.studentEmail}</p><p className="text-[11px] text-slate-600">{st.indicatorNote}</p></div>))}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">{support.map((st,i)=>(<div key={i} className="p-3.5 rounded-lg bg-rose-50/60 border border-rose-200 text-xs space-y-2"><div className="flex items-center justify-between"><span className="font-bold text-slate-900 truncate">{st.studentName}</span><span className={`font-mono font-bold text-sm ${st.progressPercentage<25?'text-rose-700':'text-amber-700'}`}>{st.progressPercentage}%</span></div><ProgressBar value={st.progressPercentage} color={st.progressPercentage<25?'bg-rose-400':'bg-amber-400'}/><p className="text-slate-500 truncate">{st.studentEmail}</p><p className="text-[11px] text-slate-500">Last active: {formatDate(st.lastActivityAt)}</p>{(st.missingSubmissionsCount || 0) > 0 && (
+  <p className="text-[11px] font-semibold text-amber-700">{st.missingSubmissionsCount} missing submission{st.missingSubmissionsCount !== 1 ? 's' : ''}</p>
+)}<p className="text-[11px] text-slate-600">{st.indicatorNote}</p></div>))}</div>
         </div>
       )}
       {buckets.length>0&&(
