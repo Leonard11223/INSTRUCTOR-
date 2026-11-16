@@ -1093,7 +1093,7 @@ export function InstructorCourseStudioPage() {
               </select>
             </div>
             <div><label className="block font-semibold mb-1.5">Type</label>
-              <select value={lesForm.lessonType} onChange={e => setLesForm({ ...lesForm, lessonType: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
+              <select value={lesForm.lessonType} onChange={e => { const t = e.target.value; setLesForm({ ...lesForm, lessonType: t, codeSnippet: (t === 'laboratory' || t === 'demonstration') ? lesForm.codeSnippet : '' }); }} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
                 <option value="reading">📖 Reading</option>
                 <option value="laboratory">🔬 Laboratory</option>
                 <option value="demonstration">🧪 Demonstration</option>
@@ -1105,7 +1105,9 @@ export function InstructorCourseStudioPage() {
           </div>
           <div><label className="block font-semibold mb-1.5">Title</label><input required value={lesForm.title} onChange={e => setLesForm({ ...lesForm, title: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
           <div><label className="block font-semibold mb-1.5">Content HTML</label><textarea rows={4} required value={lesForm.contentHtml} onChange={e => setLesForm({ ...lesForm, contentHtml: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-[11px]" /></div>
-          <div><label className="block font-semibold mb-1.5">Code Snippet</label><textarea rows={3} value={lesForm.codeSnippet} onChange={e => setLesForm({ ...lesForm, codeSnippet: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono bg-slate-900 text-emerald-400 text-[11px]" /></div>
+          {(lesForm.lessonType === 'laboratory' || lesForm.lessonType === 'demonstration') && (
+          <div><label className="block font-semibold mb-1.5">Code Snippet / Script</label><textarea rows={3} value={lesForm.codeSnippet} onChange={e => setLesForm({ ...lesForm, codeSnippet: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono bg-slate-900 text-emerald-400 text-[11px]" /></div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block font-semibold mb-1.5">Est. Minutes</label><input type="number" value={lesForm.estimatedMinutes} onChange={e => setLesForm({ ...lesForm, estimatedMinutes: Number(e.target.value) })} className="w-full px-3 py-2 rounded-lg border border-slate-300" /></div>
             <div><label className="block font-semibold mb-1.5">Status</label>
