@@ -1466,13 +1466,13 @@ export function InstructorSubmissionsPage() {
             <p className="text-sm font-bold text-slate-900">{sel.assignment?.title}</p>
             {sel.textResponse&&<p className="text-slate-600 mt-1.5 leading-relaxed">{sel.textResponse}</p>}
           </div>
-          {sel.codeSubmission&&(() => { const isCode = /\b(function|const|import|def|class)\b/.test(sel.codeSubmission); return (<div><p className="font-semibold text-slate-700 mb-1">Submitted Work / Response:</p>{isCode ? (<pre className="p-3 rounded-lg bg-slate-900 text-emerald-400 font-mono text-[11px] overflow-x-auto max-h-48">{sel.codeSubmission}</pre>) : (<div className="p-3 rounded-lg bg-white border border-slate-200 text-slate-700 leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">{sel.codeSubmission}</div>)}</div>); })()}
+          {sel.codeSubmission&&(() => { const codeMatches = (sel.codeSubmission.match(/\b(function|const\s+\w+\s*=|import\s+[\w{]|def\s+\w+\s*\(|class\s+\w+[\s:{]|=>\s*{|\bvar\s+\w+\s*=)/g)||[]).length; const isCode = codeMatches >= 2; return (<div><p className="font-semibold text-slate-700 mb-1">Submitted Work / Response:</p>{isCode ? (<pre className="p-3 rounded-lg bg-slate-900 text-emerald-400 font-mono text-[11px] overflow-x-auto max-h-48">{sel.codeSubmission}</pre>) : (<div className="p-3 rounded-lg bg-white border border-slate-200 text-slate-700 leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">{sel.codeSubmission}</div>)}</div>); })()}
           {sel.flaggedForInstructorReview&&<div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 flex gap-2"><Flag className="w-4 h-4 shrink-0 mt-0.5"/><div><strong>TA Flag:</strong> {sel.flagReason||'Flagged for review'}</div></div>}
           {sel.preliminaryFeedback&&<div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-900"><strong>TA Note:</strong> {sel.preliminaryFeedback}</div>}
-          {sel.assignment?.rubricCriteria && sel.assignment.rubricCriteria.length > 0 && (
+          {(() => { const rubricCriteria = sel.assignment?.rubric?.criteria || sel.assignment?.rubricCriteria || []; return rubricCriteria.length > 0 && (
             <div className="space-y-3">
               <p className="font-semibold text-slate-700 text-xs uppercase tracking-wide">Rubric Scoring</p>
-              {sel.assignment.rubricCriteria.map(criterion => (
+              {rubricCriteria.map(criterion => (
                 <div key={criterion.criterionName} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
                   <div className="flex-1">
                     <p className="font-semibold text-slate-800 text-xs">{criterion.criterionName}</p>
@@ -1488,7 +1488,7 @@ export function InstructorSubmissionsPage() {
                         const val = Math.min(criterion.maxPoints, Math.max(0, Number(e.target.value)));
                         const updated = { ...rubricScores, [criterion.criterionName]: val };
                         setRubricScores(updated);
-                        const total = sel.assignment.rubricCriteria.reduce((sum, c) => sum + (updated[c.criterionName] ?? 0), 0);
+                        const total = rubricCriteria.reduce((sum, c) => sum + (updated[c.criterionName] ?? 0), 0);
                         setScore(total);
                       }}
                       className="w-20 px-2 py-1.5 rounded-lg border border-slate-300 font-bold text-blue-700 text-xs text-center"
@@ -1499,15 +1499,15 @@ export function InstructorSubmissionsPage() {
               ))}
               <p className="text-[11px] text-slate-500">Total auto-calculated from rubric: <strong>{Object.values(rubricScores).reduce((a, b) => a + b, 0)}</strong></p>
             </div>
-          )}
+          ); })()}
           <div className="pt-2 border-t border-slate-200 space-y-3">
             <div><label className="block font-semibold mb-1.5">Score (Max {sel.assignment?.maxScore||100})</label>
-              <input type="number" value={score} onChange={e=>setScore(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-blue-700"/>
+              {(() => { const rubricCriteria = sel.assignment?.rubric?.criteria || sel.assignment?.rubricCriteria || []; const hasRubric = rubricCriteria.length > 0; return (<input type="number" value={score} onChange={e=>setScore(e.target.value)} readOnly={hasRubric} className={`w-full px-3 py-2 rounded-lg border font-bold text-blue-700 ${hasRubric ? 'bg-slate-100 border-slate-200 cursor-not-allowed' : 'border-slate-300'}`} title={hasRubric ? 'Score is auto-calculated from rubric criteria above' : ''} />); })()}
               {(() => {
                 const maxScore = sel.assignment?.maxScore || 100;
                 const pct = (Number(score) / maxScore) * 100;
                 const letter = pct >= 90 ? 'A' : pct >= 80 ? 'B' : pct >= 70 ? 'C' : pct >= 60 ? 'D' : 'F';
-                const color = pct >= 90 ? 'text-emerald-700' : pct >= 70 ? 'text-blue-700' : pct >= 60 ? 'text-amber-700' : 'text-rose-700';
+                const color = pct >= 90 ? 'text-emerald-700' : pct >= 80 ? 'text-blue-700' : pct >= 70 ? 'text-cyan-700' : pct >= 60 ? 'text-amber-700' : 'text-rose-700';
                 return (
                   <p className={`text-sm font-bold mt-1 ${color}`}>
                     {Number(score)} / {maxScore} &mdash; {letter}
