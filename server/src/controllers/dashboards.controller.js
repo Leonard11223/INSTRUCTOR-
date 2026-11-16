@@ -356,7 +356,7 @@ async function getDashboardSummary(req, res, next) {
           order: [['submittedAt', 'DESC']]
         }) : [],
         classIds.length ? Assessment.findAll({
-          where: { classId: classIds },
+          where: { classId: classIds, closeDate: { [Op.gte]: new Date() } },
           order: [['closeDate', 'ASC']]
         }) : [],
         classIds.length ? AssessmentAttempt.findAll({
@@ -392,6 +392,7 @@ async function getDashboardSummary(req, res, next) {
           progressPercentage: Number(cp.progressPercentage),
           completedLessonsCount: cp.completedLessonsCount,
           totalLessonsCount: cp.totalLessonsCount,
+          lastActivityAt: cp.lastAccessedAt || cp.updatedAt || null,
           indicatorNote: 'Progress below 50% milestone — recommended for instructor check-in'
         }));
 
