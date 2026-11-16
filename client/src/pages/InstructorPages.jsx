@@ -219,15 +219,18 @@ export function InstructorCourseStudioPage() {
   const [lesFile, setLesFile] = useState(null);
   const [courseForm, setCourseForm] = useState({ title:'', code:'', description:'', category:'networking', creditUnits:3, deliveryMode:'Instructor-Led', level:'Intermediate', departmentId:'' });
   const [newCourseResult, setNewCourseResult] = useState(null); // holds { course, joinCode } after creation
-  const [pendingClassId, setPendingClassId] = useState(null);
+  const [pendingClassId, setPendingClassId] = useState([]);
   const [aiFile, setAiFile] = useState(null);
   const [aiTopic, setAiTopic] = useState('');
   const [aiCount, setAiCount] = useState(10);
   const [aiResults, setAiResults] = useState([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSaving, setAiSaving] = useState(false);
+  const [aiSaveBankId, setAiSaveBankId] = useState('');
+  const [aiSaveCourseId, setAiSaveCourseId] = useState('');
   const [joinCodeData, setJoinCodeData] = useState({});
   const [joinCodeLoading, setJoinCodeLoading] = useState({});
+  const [allPendingEnrollments, setAllPendingEnrollments] = useState([]);
 
   const { data: cData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
   const { data: dData, isLoading } = useQuery({ queryKey:['course',selId], queryFn:()=>lmsApi.getCourseById(selId), enabled:Boolean(selId) });
@@ -235,11 +238,11 @@ export function InstructorCourseStudioPage() {
   const { data: deptsData } = useQuery({ queryKey:['departments'], queryFn:()=>lmsApi.listDepartments() });
   const refresh = () => queryClient.invalidateQueries({ queryKey:['course',selId] });
 
-  // Pending enrollments for the current class
+  // Pending enrollments for all class sections under the selected course
   const { data: pendingData, refetch: refetchPending } = useQuery({
     queryKey: ['pending-enrollments', pendingClassId],
-    queryFn: () => lmsApi.getPendingEnrollments(pendingClassId),
-    enabled: Boolean(pendingClassId)
+    queryFn: () => lmsApi.getPendingEnrollments(Array.isArray(pendingClassId) ? pendingClassId[0] : pendingClassId),
+    enabled: Boolean(Array.isArray(pendingClassId) ? pendingClassId[0] : pendingClassId)
   });
   const pendingEnrollments = pendingData?.data?.pending || [];
 
@@ -247,6 +250,7 @@ export function InstructorCourseStudioPage() {
     try {
       await lmsApi.approveEnrollment(membershipId);
       addToast(studentName + ' approved!');
+      setAllPendingEnrollments(p => p.filter(e => e.id !== membershipId));
       refetchPending();
       queryClient.invalidateQueries({ queryKey: ['course', selId] });
     } catch (err) { addToast(extractErrorMessage(err), 'error'); }
@@ -256,6 +260,7 @@ export function InstructorCourseStudioPage() {
     try {
       await lmsApi.rejectEnrollment(membershipId, { reason: 'Enrollment request declined by instructor.' });
       addToast(studentName + '\'s request rejected.');
+      setAllPendingEnrollments(p => p.filter(e => e.id !== membershipId));
       refetchPending();
     } catch (err) { addToast(extractErrorMessage(err), 'error'); }
   };
@@ -437,7 +442,7 @@ export function InstructorCourseStudioPage() {
 
   const courses = cData?.data?.courses || [];
   const course = dData?.data?.course;
-  const toggle = (id) => setExpanded(p => ({ ...p, [id]: p[id] === false }));
+  const toggle = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
   const emoji = { reading: '📖', laboratory: '🔬', demonstration: '🧪', video: '🎬', lecture: '🎤', activity: '✏️' };
   const openEditMod = (mod) => { setModForm({ title: mod.title, description: mod.description || '', orderIndex: mod.orderIndex || 1, estimatedMinutes: mod.estimatedMinutes || 60 }); setEditMod(mod); };
   const openEditLes = (les) => { setLesForm({ moduleId: les.moduleId, title: les.title, lessonType: les.lessonType, contentHtml: les.contentHtml || '', codeSnippet: les.codeSnippet || '', estimatedMinutes: les.estimatedMinutes || 45, publicationStatus: les.publicationStatus || 'published' }); setEditLes(les); };
@@ -449,8 +454,13 @@ export function InstructorCourseStudioPage() {
       loadAllJoinCodes(course);
     }
     if (v === 'pending') {
-      const cls = course?.offerings?.[0]?.classes?.[0];
-      if (cls) { setPendingClassId(cls.id); }
+      // Collect all class IDs across all offerings
+      const allClassIds = (course?.offerings || []).flatMap(o => (o.classes || []).map(c => c.id));
+      setPendingClassId(allClassIds);
+      // Fetch pending enrollments for each class and merge
+      Promise.all(
+        allClassIds.map(cid => lmsApi.getPendingEnrollments(cid).then(r => (r?.data?.pending || []).map(e => ({ ...e, _classId: cid }))).catch(() => []))
+      ).then(results => setAllPendingEnrollments(results.flat()));
     }
   };
 
@@ -464,10 +474,10 @@ export function InstructorCourseStudioPage() {
           <p className="text-sm text-slate-500 mt-1">Author modules, lessons, and attach learning resources.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button type="button" onClick={() => { setModForm({ title:'', description:'', orderIndex:1, estimatedMinutes:60 }); setModOpen(true); }} className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg flex items-center gap-1.5">
+          <button type="button" onClick={() => { setModForm({ title:'', description:'', orderIndex:1, estimatedMinutes:60 }); setEditMod(null); setModOpen(true); }} className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" /> Module
           </button>
-          <button type="button" onClick={() => { setLesForm({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' }); setLesOpen(true); }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
+          <button type="button" onClick={() => { setLesForm({ moduleId:'', title:'', lessonType:'laboratory', contentHtml:'', codeSnippet:'', estimatedMinutes:45, publicationStatus:'published' }); setEditLes(null); setLesOpen(true); }} className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" /> Lesson
           </button>
           <button type="button" onClick={() => setCourseOpen(true)} className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
@@ -553,7 +563,7 @@ export function InstructorCourseStudioPage() {
               ['content', '📚 Content'],
               ['students', '👥 Students'],
               ['joincode', '🔑 Join Code'],
-              ['pending', '⏳ Pending (' + (pendingEnrollments.length) + ')']
+              ['pending', '⏳ Pending (' + (allPendingEnrollments.length) + ')']
             ].map(([v, l]) => (
               <button key={v} type="button" onClick={() => switchTab(v)}
                 className={'px-4 py-2 text-xs font-semibold rounded-md transition-colors ' + (studioTab === v ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-800')}>
@@ -752,10 +762,10 @@ export function InstructorCourseStudioPage() {
                   <p className="text-xs text-slate-500 mt-0.5">Students who joined via code — approve or reject each request</p>
                 </div>
                 <span className="text-xs font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-lg">
-                  {pendingEnrollments.length} pending
+                  {allPendingEnrollments.length} pending
                 </span>
               </div>
-              {pendingEnrollments.length === 0 ? (
+              {allPendingEnrollments.length === 0 ? (
                 <div className="px-5 py-10 text-center">
                   <p className="text-2xl mb-2">✅</p>
                   <p className="text-sm font-semibold text-slate-500">No pending requests</p>
@@ -763,32 +773,51 @@ export function InstructorCourseStudioPage() {
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100">
-                  {pendingEnrollments.map((m) => (
-                    <div key={m.id} className="px-5 py-4 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center shrink-0 font-bold text-amber-700 text-sm">
-                          {m.student?.firstName?.[0]}{m.student?.lastName?.[0]}
+                  {(() => {
+                    // Group by class section
+                    const groups = {};
+                    allPendingEnrollments.forEach(m => {
+                      const cid = m._classId || m.classId;
+                      if (!groups[cid]) groups[cid] = [];
+                      groups[cid].push(m);
+                    });
+                    return Object.entries(groups).map(([cid, members]) => {
+                      const sectionLabel = (course?.offerings || []).flatMap(o => o.classes || []).find(c => String(c.id) === String(cid))?.sectionCode || `Section ${cid}`;
+                      return (
+                        <div key={cid}>
+                          <div className="px-5 py-2 bg-slate-100 border-b border-slate-200">
+                            <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">{sectionLabel}</p>
+                          </div>
+                          {members.map((m) => (
+                            <div key={m.id} className="px-5 py-4 flex items-center justify-between gap-4">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center shrink-0 font-bold text-amber-700 text-sm">
+                                  {m.student?.firstName?.[0]}{m.student?.lastName?.[0]}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-slate-900">{m.student?.firstName} {m.student?.lastName}</p>
+                                  <p className="text-[11px] text-slate-500">{m.student?.email}</p>
+                                  <p className="text-[11px] font-mono text-slate-400">{m.student?.studentNumber}</p>
+                                </div>
+                              </div>
+                              <div className="flex gap-2 shrink-0">
+                                <button type="button"
+                                  onClick={() => handleApprove(m.id, m.student?.firstName + ' ' + m.student?.lastName)}
+                                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1">
+                                  ✓ Approve
+                                </button>
+                                <button type="button"
+                                  onClick={() => handleReject(m.id, m.student?.firstName + ' ' + m.student?.lastName)}
+                                  className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg flex items-center gap-1">
+                                  ✕ Reject
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-slate-900">{m.student?.firstName} {m.student?.lastName}</p>
-                          <p className="text-[11px] text-slate-500">{m.student?.email}</p>
-                          <p className="text-[11px] font-mono text-slate-400">{m.student?.studentNumber}</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 shrink-0">
-                        <button type="button"
-                          onClick={() => handleApprove(m.id, m.student?.firstName + ' ' + m.student?.lastName)}
-                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1">
-                          ✓ Approve
-                        </button>
-                        <button type="button"
-                          onClick={() => handleReject(m.id, m.student?.firstName + ' ' + m.student?.lastName)}
-                          className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg flex items-center gap-1">
-                          ✕ Reject
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    });
+                  })()}
                 </div>
               )}
             </div>
@@ -1090,7 +1119,7 @@ export function InstructorCourseStudioPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[11px] font-semibold mb-1 text-slate-600">Question Bank</label>
-                    <select id="ai-bank-id" className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
+                    <select id="ai-bank-id" value={aiSaveBankId} onChange={e => setAiSaveBankId(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
                       <option value="">— Select bank —</option>
                       {(banksData?.data?.questionBanks||[]).map(b=>(
                         <option key={b.id} value={b.id}>{b.title} — {b.topic}</option>
@@ -1102,7 +1131,7 @@ export function InstructorCourseStudioPage() {
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold mb-1 text-slate-600">Course</label>
-                    <select id="ai-course-id" defaultValue={selId} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
+                    <select id="ai-course-id" value={aiSaveCourseId} onChange={e => setAiSaveCourseId(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs">
                       <option value="">— Select course —</option>
                       {(cData?.data?.courses||[]).map(c=>(
                         <option key={c.id} value={c.id}>{c.code} — {c.title}</option>
@@ -1111,9 +1140,7 @@ export function InstructorCourseStudioPage() {
                   </div>
                 </div>
                 <button type="button" disabled={aiSaving} onClick={() => {
-                  const bankId = document.getElementById('ai-bank-id')?.value;
-                  const courseId = document.getElementById('ai-course-id')?.value;
-                  handleSaveAiQuestions(bankId, courseId);
+                  handleSaveAiQuestions(aiSaveBankId, aiSaveCourseId);
                 }} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg disabled:opacity-60">
                   {aiSaving ? 'Saving...' : '💾 Save All to Question Bank'}
                 </button>
@@ -1175,6 +1202,9 @@ export function InstructorAssignmentsPage() {
   const { data: classesData } = useQuery({ queryKey:['classes'], queryFn:lmsApi.listClasses });
   const { data: coursesData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
   const { data, isLoading, error } = useQuery({ queryKey:['assignments'], queryFn:()=>lmsApi.listAssignments() });
+  const { data: csvGbData } = useQuery({ queryKey:['gradebook', csvClassId], queryFn:()=>lmsApi.getClassGradebook(csvClassId), enabled:!!csvClassId });
+
+  useEffect(() => { setCsvCatId(''); }, [csvClassId]);
 
   const openCreate = () => { setForm(emptyForm); setCreateOpen(true); };
   const openEdit = (a) => { setForm({ classId:a.classId||'', courseId:a.courseId||'', title:a.title, assignmentType:a.assignmentType, instructions:a.instructions||'', dueDate:a.dueDate?a.dueDate.slice(0,10):'', maxScore:a.maxScore, starterCode:a.starterCode||'', rubricCriteria: a.rubric?.criteria ? a.rubric.criteria.map(c=>({criterionName:c.criterionName,maxPoints:c.maxPoints})) : [] }); setEditItem(a); };
@@ -1332,10 +1362,7 @@ export function InstructorAssignmentsPage() {
           <div><label className="block font-semibold mb-1.5">Grade Category</label>
             <select required value={csvCatId} onChange={e=>setCsvCatId(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
               <option value="">— Select category —</option>
-              <option value="1">Quizzes</option>
-              <option value="2">Assignments</option>
-              <option value="3">Laboratory Activities</option>
-              <option value="4">Major Examination</option>
+              {(csvGbData?.data?.categories || []).map(cat=><option key={cat.id} value={cat.id}>{cat.name}</option>)}
             </select></div>
           <div><label className="block font-semibold mb-1.5">CSV File</label><input required type="file" accept=".csv" onChange={e=>setCsvFile(e.target.files[0])} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
           <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">Import Grades</button>
@@ -1449,7 +1476,7 @@ export function InstructorSubmissionsPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <button type="button" onClick={()=>{setSel(s);setScore(s.score??90);setFeedback(s.feedback||'');}} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-[11px] flex items-center gap-1"><Eye className="w-3 h-3"/> Evaluate</button>
-                        {s.storedFilename&&<a href={`/api/resources/${s.id}/download`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Download submitted file"><FileDown className="w-3.5 h-3.5"/></a>}
+                        {(s.resourceId || s.fileResourceId || s.storedFilename) && <a href={`/api/resources/${s.resourceId || s.fileResourceId || s.id}/download`} target="_blank" rel="noreferrer" className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Download submitted file"><FileDown className="w-3.5 h-3.5"/></a>}
                       </div>
                     </td>
                   </tr>
@@ -1502,7 +1529,7 @@ export function InstructorSubmissionsPage() {
           ); })()}
           <div className="pt-2 border-t border-slate-200 space-y-3">
             <div><label className="block font-semibold mb-1.5">Score (Max {sel.assignment?.maxScore||100})</label>
-              {(() => { const rubricCriteria = sel.assignment?.rubric?.criteria || sel.assignment?.rubricCriteria || []; const hasRubric = rubricCriteria.length > 0; return (<input type="number" value={score} onChange={e=>setScore(e.target.value)} readOnly={hasRubric} className={`w-full px-3 py-2 rounded-lg border font-bold text-blue-700 ${hasRubric ? 'bg-slate-100 border-slate-200 cursor-not-allowed' : 'border-slate-300'}`} title={hasRubric ? 'Score is auto-calculated from rubric criteria above' : ''} />); })()}
+              {(() => { const rubricCriteria = sel.assignment?.rubric?.criteria || sel.assignment?.rubricCriteria || []; const hasRubric = rubricCriteria.length > 0; return (<input type="number" value={score} onChange={e=>setScore(Math.max(0, Number(e.target.value) || 0))} readOnly={hasRubric} className={`w-full px-3 py-2 rounded-lg border font-bold text-blue-700 ${hasRubric ? 'bg-slate-100 border-slate-200 cursor-not-allowed' : 'border-slate-300'}`} title={hasRubric ? 'Score is auto-calculated from rubric criteria above' : ''} />); })()}
               {(() => {
                 const maxScore = sel.assignment?.maxScore || 100;
                 const pct = (Number(score) / maxScore) * 100;
@@ -1900,7 +1927,9 @@ export function InstructorGradebookPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200">
         <div><Badge label="Weighted Gradebook" color="rose" icon={Award}/><h1 className="text-2xl font-bold text-slate-900 tracking-tight">Class Gradebook</h1><p className="text-sm text-slate-500 mt-1">Weighted calculations with auditable revision history.</p></div>
         <div className="flex gap-2 flex-wrap">
+          {selClass && (
           <a href={`/api/reports?type=gradebook&classId=${selClass}&format=csv`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg"><FileDown className="w-4 h-4"/> CSV</a>
+          )}
           <button type="button" onClick={openCat} disabled={!selClass} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg disabled:opacity-40"><Pencil className="w-4 h-4"/> Edit Weights</button>
           <button type="button" onClick={()=>setManOpen(true)} disabled={!selClass} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg disabled:opacity-40"><Plus className="w-4 h-4"/> Enter Grade</button>
           <button type="button" onClick={handleSubmitFinal} disabled={!selClass} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg disabled:opacity-40"><Send className="w-4 h-4"/> Submit Final</button>
@@ -2089,7 +2118,7 @@ export function InstructorClassManagementPage() {
       setNewSession(false);
       // Pre-populate from the created session
       const records = {};
-      (res.data.session.records||[]).forEach(r => { records[r.studentId] = r.status; });
+      (res.data.session.records||[]).forEach(r => { records[r.student?.id || r.studentId] = r.status; });
       setAttendRecords(records);
       setActiveSession(res.data.session);
       refetchAttend();
@@ -2110,7 +2139,7 @@ export function InstructorClassManagementPage() {
 
   const openSession = (session) => {
     const records = {};
-    (session.records||[]).forEach(r => { records[r.studentId] = r.status; });
+    (session.records||[]).forEach(r => { records[r.student?.id || r.studentId] = r.status; });
     setAttendRecords(records);
     setActiveSession(session);
   };
@@ -2214,8 +2243,8 @@ export function InstructorClassManagementPage() {
                   <span className="font-semibold text-slate-900">{m.student?.firstName} {m.student?.lastName}</span>
                   <div className="flex gap-1">
                     {['present','late','excused','absent'].map(s=>(
-                      <button key={s} type="button" onClick={()=>setAttendRecords(p=>({...p,[m.studentId]:s}))}
-                        className={`px-2.5 py-1 rounded-lg font-semibold capitalize transition-colors ${attendRecords[m.studentId]===s?({'present':'bg-emerald-600 text-white','late':'bg-amber-500 text-white','excused':'bg-blue-500 text-white','absent':'bg-rose-600 text-white'}[s]):'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>{s}</button>
+                      <button key={s} type="button" onClick={()=>setAttendRecords(p=>({...p,[m.student?.id || m.studentId]:s}))}
+                        className={`px-2.5 py-1 rounded-lg font-semibold capitalize transition-colors ${attendRecords[m.student?.id || m.studentId]===s?({'present':'bg-emerald-600 text-white','late':'bg-amber-500 text-white','excused':'bg-blue-500 text-white','absent':'bg-rose-600 text-white'}[s]):'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>{s}</button>
                     ))}
                   </div>
                 </div>
