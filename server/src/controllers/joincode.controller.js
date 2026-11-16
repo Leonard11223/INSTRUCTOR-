@@ -16,8 +16,10 @@ const { AppError } = require('../middleware/error.middleware');
 const { recordAudit } = require('../utils/auditLogger');
 const { createNotification } = require('../utils/notifyUser');
 
-/* ── Access check — allows admin OR instructor assigned to class
-   OR instructor who teaches ANY class of the same course ────── */
+/* ── Access check — allows admin OR instructor assigned to the class
+   OR any instructor who teaches ANY class section of the same course.
+   Instructors may manage join codes for every class section of a course
+   they are assigned to teach, not only the section they directly own. ─ */
 async function checkInstructorAccess(user, classId) {
   if (!classId) throw new AppError('Invalid class ID.', 400);
 
@@ -29,14 +31,16 @@ async function checkInstructorAccess(user, classId) {
   });
   if (!classSection) throw new AppError('Class section not found.', 404);
 
-  // Check direct assignment
+  const courseId = classSection.courseOffering?.courseId;
+
+  // Direct assignment to this specific class section
   const directAssign = await InstructorAssignment.findOne({
     where: { classId, instructorId: user.id }
   });
   if (directAssign) return true;
 
-  // Check if instructor teaches any other class of the same course
-  const courseId = classSection.courseOffering?.courseId;
+  // Instructors may manage join codes for ANY class section of a course
+  // they are assigned to teach — including sibling sections of the same course.
   if (courseId) {
     const offerings = await CourseOffering.findAll({ where: { courseId } });
     const offeringIds = offerings.map(o => o.id);
@@ -46,16 +50,18 @@ async function checkInstructorAccess(user, classId) {
         where: { courseOfferingId: { [Op.in]: offeringIds } }
       });
       const relatedClassIds = relatedClasses.map(c => c.id);
-      const anyAssign = await InstructorAssignment.findOne({
-        where: { classId: { [Op.in]: relatedClassIds }, instructorId: user.id }
-      });
-      if (anyAssign) return true;
+      if (relatedClassIds.length > 0) {
+        const anyAssign = await InstructorAssignment.findOne({
+          where: { classId: { [Op.in]: relatedClassIds }, instructorId: user.id }
+        });
+        if (anyAssign) return true;
+      }
     }
-  }
 
-  // Also allow if course was created by this instructor
-  const course = await Course.findByPk(courseId);
-  if (course && course.createdBy === user.id) return true;
+    // Also allow if the course was created by this instructor
+    const course = await Course.findByPk(courseId);
+    if (course && course.createdBy === user.id) return true;
+  }
 
   throw new AppError('Forbidden: You do not have access to this class section.', 403);
 }

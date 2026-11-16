@@ -265,8 +265,8 @@ export function InstructorCourseStudioPage() {
   const [aiSelectedIndices, setAiSelectedIndices] = useState([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSaving, setAiSaving] = useState(false);
-  const [joinCodeData, setJoinCodeData] = useState(null);
-  const [joinCodeLoading, setJoinCodeLoading] = useState(false);
+  const [joinCodeData, setJoinCodeData] = useState({});
+  const [joinCodeLoading, setJoinCodeLoading] = useState({});
 
   const { data: cData } = useQuery({ queryKey:['courses'], queryFn:()=>lmsApi.listCourses() });
   const { data: dData, isLoading } = useQuery({ queryKey:['course',selId], queryFn:()=>lmsApi.getCourseById(selId), enabled:Boolean(selId) });
@@ -311,20 +311,27 @@ export function InstructorCourseStudioPage() {
 
   const loadJoinCode = async (classId) => {
     if (!classId) return;
-    setJoinCodeLoading(true);
+    setJoinCodeLoading(p => ({ ...p, [classId]: true }));
     try {
       const res = await lmsApi.getJoinCodeInfo(classId);
-      setJoinCodeData(res.data);
+      setJoinCodeData(p => ({ ...p, [classId]: res.data }));
     } catch (_) {
       // ignore
     }
-    setJoinCodeLoading(false);
+    setJoinCodeLoading(p => ({ ...p, [classId]: false }));
+  };
+
+  // Load the join code for EVERY class section under the selected course
+  const loadAllJoinCodes = (courseObj) => {
+    (courseObj?.offerings || []).forEach((offering) => {
+      (offering.classes || []).forEach((cls) => loadJoinCode(cls.id));
+    });
   };
 
   const handleGenerateJoinCode = async (classId, regenerate) => {
     try {
       const res = await lmsApi.generateJoinCode(classId, { enable: true, regenerate: !!regenerate });
-      setJoinCodeData(res.data);
+      setJoinCodeData(p => ({ ...p, [classId]: res.data }));
       addToast('Join code generated!');
     } catch (err) {
       addToast(extractErrorMessage(err), 'error');
@@ -334,7 +341,7 @@ export function InstructorCourseStudioPage() {
   const handleDisableJoinCode = async (classId) => {
     try {
       const res = await lmsApi.generateJoinCode(classId, { enable: false });
-      setJoinCodeData(res.data);
+      setJoinCodeData(p => ({ ...p, [classId]: res.data }));
       addToast('Join code disabled.');
     } catch (err) {
       addToast(extractErrorMessage(err), 'error');
@@ -680,15 +687,15 @@ export function InstructorCourseStudioPage() {
     }
   };
   const toggle = (id) => setExpanded(p => ({ ...p, [id]: p[id] === false }));
-  const emoji = { laboratory: '🔬', video: '🎬', coding_exercise: '💻', reading: '📖' };
+  const emoji = { reading: '📖', laboratory: '🔬', demonstration: '🧪', video: '🎬', lecture: '🎤', activity: '✏️' };
   const openEditMod = (mod) => { setModForm({ title: mod.title, description: mod.description || '', orderIndex: mod.orderIndex || 1, estimatedMinutes: mod.estimatedMinutes || 60 }); setEditMod(mod); };
   const openEditLes = (les) => { setLesForm({ moduleId: les.moduleId, title: les.title, lessonType: les.lessonType, contentHtml: les.contentHtml || '', codeSnippet: les.codeSnippet || '', estimatedMinutes: les.estimatedMinutes || 45, publicationStatus: les.publicationStatus || 'published' }); setEditLes(les); };
 
   const switchTab = (v) => {
     setStudioTab(v);
     if (v === 'joincode') {
-      const cls = course?.offerings?.[0]?.classes?.[0];
-      if (cls) { loadJoinCode(cls.id); }
+      // Show the join code for ALL class sections under this course
+      loadAllJoinCodes(course);
     }
     if (v === 'pending') {
       const cls = course?.offerings?.[0]?.classes?.[0];
@@ -945,57 +952,67 @@ export function InstructorCourseStudioPage() {
           {/* Join Code Tab */}
           {studioTab === 'joincode' && (
             <div className="space-y-4">
-              {(course.offerings || []).length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-8">No class sections found.</p>
-              ) : (
-                (course.offerings || []).map((offering) => (
-                  (offering.classes || []).map((cls) => (
-                    <div key={cls.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <p className="text-xs font-bold text-slate-900">{cls.sectionCode} — {course.title}</p>
-                          <p className="text-[11px] text-slate-500">{offering.semester?.name}</p>
-                        </div>
-                        <StatusBadge status={joinCodeData?.joinCodeEnabled ? 'active' : 'draft'} />
-                      </div>
-                      {joinCodeLoading ? <LoadingState /> : (
-                        <div className="space-y-4">
-                          {joinCodeData?.joinCode && joinCodeData?.joinCodeEnabled ? (
-                            <div className="p-4 rounded-xl bg-blue-50 border-2 border-blue-200 text-center">
-                              <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-1">Class Join Code</p>
-                              <p className="text-4xl font-black text-blue-800 tracking-[0.3em] font-mono">{joinCodeData.joinCode}</p>
-                              <p className="text-xs text-blue-600 mt-2">{joinCodeData.enrolledCount || 0} / {joinCodeData.capacity} students enrolled</p>
-                              <p className="text-[11px] text-slate-500 mt-1">Share this code with your students. They enter it in the Student Dashboard to join.</p>
-                            </div>
-                          ) : (
-                            <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center">
-                              <p className="text-xs text-slate-500">No join code active for this section.</p>
-                            </div>
-                          )}
-                          <div className="flex gap-2 flex-wrap">
-                            <button type="button" onClick={() => handleGenerateJoinCode(cls.id, false)}
-                              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">
-                              {joinCodeData?.joinCode ? 'Enable Code' : 'Generate Code'}
-                            </button>
-                            {joinCodeData?.joinCode && (
-                              <button type="button" onClick={() => handleGenerateJoinCode(cls.id, true)}
-                                className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg">
-                                🔄 New Code
-                              </button>
-                            )}
-                            {joinCodeData?.joinCodeEnabled && (
-                              <button type="button" onClick={() => handleDisableJoinCode(cls.id)}
-                                className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg">
-                                Disable
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )}
+              {(() => {
+                const allSections = (course.offerings || []).flatMap((o) => o.classes || []);
+                if (allSections.length === 0) {
+                  return (
+                    <div className="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center">
+                      <p className="text-sm font-semibold text-slate-500">This course has no class sections assigned yet.</p>
+                      <p className="text-xs text-slate-400 mt-1">Please contact your Academic Administrator to create class sections for this course.</p>
                     </div>
-                  ))
-                ))
-              )}
+                  );
+                }
+                return (course.offerings || []).map((offering) => (
+                  (offering.classes || []).map((cls) => {
+                    const jc = joinCodeData[cls.id];
+                    return (
+                      <div key={cls.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <p className="text-xs font-bold text-slate-900">{cls.sectionCode} — {course.title}</p>
+                            <p className="text-[11px] text-slate-500">{offering.semester?.name}</p>
+                          </div>
+                          <StatusBadge status={jc?.joinCodeEnabled ? 'active' : 'draft'} />
+                        </div>
+                        {joinCodeLoading[cls.id] ? <LoadingState /> : (
+                          <div className="space-y-4">
+                            {jc?.joinCode && jc?.joinCodeEnabled ? (
+                              <div className="p-4 rounded-xl bg-blue-50 border-2 border-blue-200 text-center">
+                                <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-1">Class Join Code</p>
+                                <p className="text-4xl font-black text-blue-800 tracking-[0.3em] font-mono">{jc.joinCode}</p>
+                                <p className="text-xs text-blue-600 mt-2">{jc.enrolledCount || 0} / {jc.capacity} students enrolled</p>
+                                <p className="text-[11px] text-slate-500 mt-1">Share this code with your students. They enter it in the Student Dashboard to join.</p>
+                              </div>
+                            ) : (
+                              <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center">
+                                <p className="text-xs text-slate-500">No join code active for this section.</p>
+                              </div>
+                            )}
+                            <div className="flex gap-2 flex-wrap">
+                              <button type="button" onClick={() => handleGenerateJoinCode(cls.id, false)}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">
+                                {jc?.joinCode ? 'Enable Code' : 'Generate Code'}
+                              </button>
+                              {jc?.joinCode && (
+                                <button type="button" onClick={() => handleGenerateJoinCode(cls.id, true)}
+                                  className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold rounded-lg">
+                                  🔄 New Code
+                                </button>
+                              )}
+                              {jc?.joinCodeEnabled && (
+                                <button type="button" onClick={() => handleDisableJoinCode(cls.id)}
+                                  className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold rounded-lg">
+                                  Disable
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ));
+              })()}
             </div>
           )}
 
@@ -1079,8 +1096,10 @@ export function InstructorCourseStudioPage() {
               <select value={lesForm.lessonType} onChange={e => setLesForm({ ...lesForm, lessonType: e.target.value })} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
                 <option value="reading">📖 Reading</option>
                 <option value="laboratory">🔬 Laboratory</option>
-                <option value="coding_exercise">💻 Coding</option>
+                <option value="demonstration">🧪 Demonstration</option>
                 <option value="video">🎬 Video</option>
+                <option value="lecture">🎤 Lecture</option>
+                <option value="activity">✏️ Activity</option>
               </select>
             </div>
           </div>
@@ -1519,7 +1538,7 @@ export function InstructorCourseStudioPage() {
                 <div>
                   <label className="block font-semibold mb-1.5">Topic / Subject</label>
                   <input value={aiTopic} onChange={e => setAiTopic(e.target.value)}
-                    placeholder="e.g., Network Security, OSPF"
+                    placeholder="e.g., Photosynthesis, World War II, Algebra, etc."
                     className="w-full px-3 py-2 rounded-lg border border-slate-300" />
                   {/* Quick fill buttons from course title */}
                   {selId && (cData?.data?.courses||[]).filter(c=>c.id===selId).map(c=>(
@@ -1660,7 +1679,7 @@ export function InstructorAssignmentsPage() {
   const [csvFile, setCsvFile] = useState(null);
   const [csvCatId, setCsvCatId] = useState('');
   const [csvClassId, setCsvClassId] = useState('');
-  const emptyForm = { classId:'', courseId:'', title:'', assignmentType:'laboratory', instructions:'', dueDate:'', maxScore:100, starterCode:'// Starter\n', rubricCriteria:[{criterionName:'Functional Accuracy',maxPoints:50},{criterionName:'Documentation',maxPoints:50}] };
+  const emptyForm = { classId:'', courseId:'', title:'', assignmentType:'laboratory', instructions:'', dueDate:'', maxScore:100, starterCode:'', rubricCriteria:[{criterionName:'Functional Accuracy',maxPoints:50},{criterionName:'Documentation',maxPoints:50}] };
   const [form, setForm] = useState(emptyForm);
 
   const { data: classesData } = useQuery({ queryKey:['classes'], queryFn:lmsApi.listClasses });
@@ -1713,7 +1732,7 @@ export function InstructorAssignmentsPage() {
 
   if (error) return <ErrorState message={extractErrorMessage(error)} onRetry={()=>queryClient.invalidateQueries({queryKey:['assignments']})} />;
 
-  const typeBadge = { laboratory:'bg-violet-50 text-violet-700 border-violet-200', programming:'bg-blue-50 text-blue-700 border-blue-200', network_config:'bg-emerald-50 text-emerald-700 border-emerald-200', project_milestone:'bg-amber-50 text-amber-700 border-amber-200' };
+  const typeBadge = { written_work:'bg-blue-50 text-blue-700 border-blue-200', laboratory:'bg-violet-50 text-violet-700 border-violet-200', performance_task:'bg-emerald-50 text-emerald-700 border-emerald-200', project:'bg-amber-50 text-amber-700 border-amber-200', recitation:'bg-rose-50 text-rose-700 border-rose-200', case_study:'bg-cyan-50 text-cyan-700 border-cyan-200' };
   const filtered = all.filter(a=>(filter==='all'||a.assignmentType===filter)&&(!search||a.title.toLowerCase().includes(search.toLowerCase())));
 
   const assignmentFormContent = (
@@ -1734,7 +1753,7 @@ export function InstructorAssignmentsPage() {
       <div className="grid grid-cols-2 gap-3">
         <div><label className="block font-semibold mb-1.5">Type</label>
           <select value={form.assignmentType} onChange={e=>setForm(p=>({...p,assignmentType:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white">
-            <option value="laboratory">Laboratory</option><option value="programming">Programming</option><option value="network_config">Network Config</option><option value="project_milestone">Project</option>
+            <option value="written_work">Written Work</option><option value="laboratory">Laboratory</option><option value="performance_task">Performance Task</option><option value="project">Project</option><option value="recitation">Recitation</option><option value="case_study">Case Study</option>
           </select></div>
         <div><label className="block font-semibold mb-1.5">Due Date</label><input type="date" required value={form.dueDate} onChange={e=>setForm(p=>({...p,dueDate:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
       </div>
@@ -1742,10 +1761,10 @@ export function InstructorAssignmentsPage() {
         <input type="number" value={form.maxScore} onChange={e=>setForm(p=>({...p,maxScore:Number(e.target.value)}))} className="w-full px-3 py-2 rounded-lg border border-slate-300"/>
       </div>
       <div><label className="block font-semibold mb-1.5">Instructions</label>
-        <textarea required rows={3} value={form.instructions} onChange={e=>setForm(p=>({...p,instructions:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/>
+        <textarea required rows={3} value={form.instructions} onChange={e=>setForm(p=>({...p,instructions:e.target.value}))} placeholder="Describe the task, requirements, and how students should submit their work..." className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"/>
       </div>
-      <div><label className="block font-semibold mb-1.5">Starter Code</label>
-        <textarea rows={3} value={form.starterCode} onChange={e=>setForm(p=>({...p,starterCode:e.target.value}))} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono"/>
+      <div><label className="block font-semibold mb-1.5">Reference Material / Template <span className="text-slate-400 font-normal">(optional)</span></label>
+        <textarea rows={3} value={form.starterCode} onChange={e=>setForm(p=>({...p,starterCode:e.target.value}))} placeholder="e.g., formula, template, instructions, or leave blank" className="w-full px-3 py-2 rounded-lg border border-slate-300"/>
       </div>
       <button type="submit" className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg">{editItem?'Update Assignment':'Publish Assignment'}</button>
     </form>
@@ -1760,7 +1779,7 @@ export function InstructorAssignmentsPage() {
       </div>
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div className="flex flex-wrap gap-2">
-          {[['all','All'],['laboratory','Laboratory'],['programming','Programming'],['network_config','Network Config'],['project_milestone','Project']].map(([v,l])=>(
+          {[['all','All'],['written_work','Written Work'],['laboratory','Laboratory'],['performance_task','Performance Task'],['project','Project'],['recitation','Recitation'],['case_study','Case Study']].map(([v,l])=>(
             <Tab key={v} label={l} count={v==='all'?all.length:all.filter(a=>a.assignmentType===v).length} active={filter===v} onClick={()=>setFilter(v)}/>
           ))}
         </div>
@@ -1949,8 +1968,12 @@ export function InstructorSubmissionsPage() {
       )}
       <ModalDialog isOpen={Boolean(sel)} onClose={()=>setSel(null)} title={`Evaluate — ${sel?.student?.firstName||''} ${sel?.student?.lastName||''}`} maxWidth="max-w-2xl">
         {sel&&<div className="space-y-4 text-xs">
-          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200"><p className="font-bold text-slate-900">{sel.assignment?.title}</p>{sel.textResponse&&<p className="text-slate-600 mt-1 leading-relaxed">{sel.textResponse}</p>}</div>
-          {sel.codeSubmission&&<div><p className="font-semibold text-slate-700 mb-1">Submitted Code:</p><pre className="p-3 rounded-lg bg-slate-900 text-emerald-400 font-mono text-[11px] overflow-x-auto max-h-48">{sel.codeSubmission}</pre></div>}
+          <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-0.5">Assignment</p>
+            <p className="text-sm font-bold text-slate-900">{sel.assignment?.title}</p>
+            {sel.textResponse&&<p className="text-slate-600 mt-1.5 leading-relaxed">{sel.textResponse}</p>}
+          </div>
+          {sel.codeSubmission&&(() => { const isCode = /\b(function|const|import|def|class)\b/.test(sel.codeSubmission); return (<div><p className="font-semibold text-slate-700 mb-1">Submitted Work / Response:</p>{isCode ? (<pre className="p-3 rounded-lg bg-slate-900 text-emerald-400 font-mono text-[11px] overflow-x-auto max-h-48">{sel.codeSubmission}</pre>) : (<div className="p-3 rounded-lg bg-white border border-slate-200 text-slate-700 leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">{sel.codeSubmission}</div>)}</div>); })()}
           {sel.flaggedForInstructorReview&&<div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 flex gap-2"><Flag className="w-4 h-4 shrink-0 mt-0.5"/><div><strong>TA Flag:</strong> {sel.flagReason||'Flagged for review'}</div></div>}
           {sel.preliminaryFeedback&&<div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-900"><strong>TA Note:</strong> {sel.preliminaryFeedback}</div>}
           <div className="pt-2 border-t border-slate-200 space-y-3">
@@ -1958,7 +1981,7 @@ export function InstructorSubmissionsPage() {
               <input type="number" value={score} onChange={e=>setScore(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-blue-700"/>
               <div className="mt-2"><ProgressBar value={(score/(sel.assignment?.maxScore||100))*100} color={score>=75?'bg-emerald-500':score>=50?'bg-amber-400':'bg-rose-400'}/></div>
             </div>
-            <div><label className="block font-semibold mb-1.5">Instructor Feedback</label><textarea rows={3} value={feedback} onChange={e=>setFeedback(e.target.value)} placeholder="Provide constructive feedback…" className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
+            <div><label className="block font-semibold mb-1.5">Instructor Feedback</label><textarea rows={3} value={feedback} onChange={e=>setFeedback(e.target.value)} placeholder="Provide constructive feedback on the student's work..." className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
           </div>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={()=>handleGrade(true)} className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold rounded-lg">Return for Revision</button>
@@ -2410,6 +2433,8 @@ export function InstructorGradebookPage() {
 
   const classes = clsData?.data?.classes||[];
   const gb = gbData?.data||{};
+  // Subject-agnostic display names for grade category types
+  const categoryTypeLabel = { quiz:'Quiz', assignment:'Assignment', laboratory:'Laboratory', major_exam:'Major Exam', project:'Project', other:'Other' };
 
   // Grade distribution chart data
   const distData = ['A','B','C','D','F'].map(letter => ({
@@ -2461,7 +2486,7 @@ export function InstructorGradebookPage() {
         <>
           {(gb.categories||[]).length>0&&<div className="grid grid-cols-2 sm:grid-cols-4 gap-3">{(gb.categories||[]).map(cat=>(
             <div key={cat.id} className="bg-white rounded-xl border border-slate-200 p-4">
-              <p className="text-[11px] font-semibold uppercase text-slate-500">{cat.categoryType}</p>
+              <p className="text-[11px] font-semibold uppercase text-slate-500">{categoryTypeLabel[cat.categoryType] || cat.categoryType}</p>
               <p className="text-xs font-bold text-slate-900 mt-0.5">{cat.name}</p>
               <p className="text-xl font-extrabold text-blue-600 mt-1">{cat.weightPercent}%</p>
               <ProgressBar value={cat.weightPercent} color="bg-blue-500" height="h-1.5"/>
