@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1354,6 +1354,7 @@ export function InstructorSubmissionsPage() {
   const [sel, setSel] = useState(null);
   const [score, setScore] = useState(90);
   const [feedback, setFeedback] = useState('');
+  const [rubricScores, setRubricScores] = useState({});
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [batchSelected, setBatchSelected] = useState([]);
@@ -1361,13 +1362,15 @@ export function InstructorSubmissionsPage() {
   const [batchScore, setBatchScore] = useState(90);
   const [batchFeedback, setBatchFeedback] = useState('');
 
+  useEffect(() => { setRubricScores({}); }, [sel]);
+
   const { data, isLoading, error } = useQuery({ queryKey:['submissions'], queryFn:()=>lmsApi.listSubmissions() });
 
   const handleGrade = async (returnForRevision=false) => {
     if (!sel) return;
     try {
       const res = await lmsApi.reviewSubmission(sel.id, { score:Number(score), feedback, returnForRevision });
-      addToast(res.message); setSel(null);
+      addToast(res.message); setSel(null); setRubricScores({});
       queryClient.invalidateQueries({ queryKey:['submissions'] });
       queryClient.invalidateQueries({ queryKey:['dashboard'] });
     } catch (err) { addToast(extractErrorMessage(err),'error'); }
@@ -1456,7 +1459,7 @@ export function InstructorSubmissionsPage() {
           </div>
         </div>
       )}
-      <ModalDialog isOpen={Boolean(sel)} onClose={()=>setSel(null)} title={`Evaluate — ${sel?.student?.firstName||''} ${sel?.student?.lastName||''}`} maxWidth="max-w-2xl">
+      <ModalDialog isOpen={Boolean(sel)} onClose={()=>{ setSel(null); setRubricScores({}); }} title={`Evaluate — ${sel?.student?.firstName||''} ${sel?.student?.lastName||''}`} maxWidth="max-w-2xl">
         {sel&&<div className="space-y-4 text-xs">
           <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 mb-0.5">Assignment</p>
@@ -1466,16 +1469,58 @@ export function InstructorSubmissionsPage() {
           {sel.codeSubmission&&(() => { const isCode = /\b(function|const|import|def|class)\b/.test(sel.codeSubmission); return (<div><p className="font-semibold text-slate-700 mb-1">Submitted Work / Response:</p>{isCode ? (<pre className="p-3 rounded-lg bg-slate-900 text-emerald-400 font-mono text-[11px] overflow-x-auto max-h-48">{sel.codeSubmission}</pre>) : (<div className="p-3 rounded-lg bg-white border border-slate-200 text-slate-700 leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">{sel.codeSubmission}</div>)}</div>); })()}
           {sel.flaggedForInstructorReview&&<div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 flex gap-2"><Flag className="w-4 h-4 shrink-0 mt-0.5"/><div><strong>TA Flag:</strong> {sel.flagReason||'Flagged for review'}</div></div>}
           {sel.preliminaryFeedback&&<div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-900"><strong>TA Note:</strong> {sel.preliminaryFeedback}</div>}
+          {sel.assignment?.rubricCriteria && sel.assignment.rubricCriteria.length > 0 && (
+            <div className="space-y-3">
+              <p className="font-semibold text-slate-700 text-xs uppercase tracking-wide">Rubric Scoring</p>
+              {sel.assignment.rubricCriteria.map(criterion => (
+                <div key={criterion.criterionName} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
+                  <div className="flex-1">
+                    <p className="font-semibold text-slate-800 text-xs">{criterion.criterionName}</p>
+                    <p className="text-[11px] text-slate-500">Max: {criterion.maxPoints} pts</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={criterion.maxPoints}
+                      value={rubricScores[criterion.criterionName] ?? 0}
+                      onChange={e => {
+                        const val = Math.min(criterion.maxPoints, Math.max(0, Number(e.target.value)));
+                        const updated = { ...rubricScores, [criterion.criterionName]: val };
+                        setRubricScores(updated);
+                        const total = sel.assignment.rubricCriteria.reduce((sum, c) => sum + (updated[c.criterionName] ?? 0), 0);
+                        setScore(total);
+                      }}
+                      className="w-20 px-2 py-1.5 rounded-lg border border-slate-300 font-bold text-blue-700 text-xs text-center"
+                    />
+                    <span className="text-[11px] text-slate-500 whitespace-nowrap">/ {criterion.maxPoints}</span>
+                  </div>
+                </div>
+              ))}
+              <p className="text-[11px] text-slate-500">Total auto-calculated from rubric: <strong>{Object.values(rubricScores).reduce((a, b) => a + b, 0)}</strong></p>
+            </div>
+          )}
           <div className="pt-2 border-t border-slate-200 space-y-3">
             <div><label className="block font-semibold mb-1.5">Score (Max {sel.assignment?.maxScore||100})</label>
               <input type="number" value={score} onChange={e=>setScore(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-blue-700"/>
+              {(() => {
+                const maxScore = sel.assignment?.maxScore || 100;
+                const pct = (Number(score) / maxScore) * 100;
+                const letter = pct >= 90 ? 'A' : pct >= 80 ? 'B' : pct >= 70 ? 'C' : pct >= 60 ? 'D' : 'F';
+                const color = pct >= 90 ? 'text-emerald-700' : pct >= 70 ? 'text-blue-700' : pct >= 60 ? 'text-amber-700' : 'text-rose-700';
+                return (
+                  <p className={`text-sm font-bold mt-1 ${color}`}>
+                    {Number(score)} / {maxScore} &mdash; {letter}
+                  </p>
+                );
+              })()}
               <div className="mt-2"><ProgressBar value={(score/(sel.assignment?.maxScore||100))*100} color={score>=75?'bg-emerald-500':score>=50?'bg-amber-400':'bg-rose-400'}/></div>
             </div>
             <div><label className="block font-semibold mb-1.5">Instructor Feedback</label><textarea rows={3} value={feedback} onChange={e=>setFeedback(e.target.value)} placeholder="Provide constructive feedback on the student's work..." className="w-full px-3 py-2 rounded-lg border border-slate-300"/></div>
           </div>
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={()=>handleGrade(true)} className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold rounded-lg">Return for Revision</button>
-            <button type="button" onClick={()=>handleGrade(false)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg">Publish Grade</button>
+            <button type="button" onClick={()=>handleGrade(true)} className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold rounded-lg">Request Resubmission</button>
+            <button type="button" onClick={()=>handleGrade(false)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg">Save Grade</button>
           </div>
         </div>}
       </ModalDialog>
