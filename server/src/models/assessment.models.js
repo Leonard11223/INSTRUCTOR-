@@ -10,7 +10,7 @@ module.exports = (sequelize) => {
     title: { type: DataTypes.STRING(220), allowNull: false },
     instructions: { type: DataTypes.TEXT('long'), allowNull: false },
     assignmentType: {
-      type: DataTypes.ENUM('standard', 'programming', 'laboratory', 'network_config', 'project_milestone', 'written_work', 'performance_task', 'project', 'recitation', 'case_study'),
+      type: DataTypes.ENUM('standard', 'programming', 'laboratory', 'network_config', 'project_milestone'),
       defaultValue: 'standard',
       field: 'assignment_type'
     },

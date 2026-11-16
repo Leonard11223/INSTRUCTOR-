@@ -27,7 +27,7 @@ module.exports = (sequelize) => {
     title: { type: DataTypes.STRING(220), allowNull: false },
     slug: { type: DataTypes.STRING(220), allowNull: true },
     lessonType: {
-      type: DataTypes.ENUM('reading', 'video', 'laboratory', 'coding_exercise', 'interactive', 'demonstration', 'lecture', 'activity'),
+      type: DataTypes.ENUM('reading', 'video', 'laboratory', 'coding_exercise', 'interactive'),
       defaultValue: 'reading',
       field: 'lesson_type'
     },
